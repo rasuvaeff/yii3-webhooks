@@ -1,0 +1,109 @@
+# yii3-webhooks
+
+## Install
+
+```bash
+composer require rasuvaeff/yii3-webhooks
+```
+
+## Rules
+
+- Sign outbound: `HmacSha256Signer::sign(payload, secret, timestamp, eventId)` → `WebhookSignature`.
+- Canonical message: `"{eventId}.{timestamp}.{payload}"`, where `payload` is the exact HTTP body string.
+- Send `X-Webhook-Id: {eventId}` and `X-Webhook-Signature: t={ts},v1={hex}` headers.
+- Verify inbound: `WebhookVerifier::verify(payload, secret, signature, eventId)` returns bool.
+- Use `hash_equals()` internally — never `===` for signatures.
+- `WebhookDelivery` stores only `endpointUrl`, never the secret.
+- `NonceStorage::add()` must be atomic and return false on duplicate nonce.
+- `ReplayGuard::accept()` throws `RuntimeException` when storage rejects a duplicate nonce.
+- Use event ID (from `X-Webhook-Id` header) as the nonce for replay protection.
+- No HTTP client dependency — implement `WebhookDispatcher` in your adapter.
+
+## API
+
+### Signing (outbound)
+
+```php
+use Rasuvaeff\Yii3Webhooks\HmacSha256Signer;
+use Rasuvaeff\Yii3Webhooks\WebhookEndpoint;
+use Rasuvaeff\Yii3Webhooks\WebhookEvent;
+
+$event = WebhookEvent::create(
+    type: 'order.created',
+    payload: json_encode(['orderId' => 42]),
+);
+
+$signer = new HmacSha256Signer();
+$signature = $signer->sign(
+    payload: $event->getPayload(),
+    secret: $endpoint->getSecret(),
+    timestamp: $clock->now()->getTimestamp(),
+    eventId: $event->getId(),
+);
+
+// X-Webhook-Id: {$event->getId()}
+$header = $signature->toHeaderValue(); // "t=1717228800,v1=<hex>"
+```
+
+`WebhookSigner` is the signing interface. Use `HmacSha256Signer` unless you need a compatible custom scheme.
+
+### Verification (inbound)
+
+```php
+use Rasuvaeff\Yii3Webhooks\WebhookSignature;
+use Rasuvaeff\Yii3Webhooks\WebhookVerifier;
+
+$verifier = new WebhookVerifier(signer: $signer, clock: $clock, toleranceSeconds: 300);
+$sig = WebhookSignature::fromHeaderValue($request->getHeaderLine('X-Webhook-Signature'));
+$eventId = $request->getHeaderLine('X-Webhook-Id');
+$valid = $verifier->verify(payload: $body, secret: $secret, signature: $sig, eventId: $eventId);
+```
+
+### Replay protection
+
+```php
+use Rasuvaeff\Yii3Webhooks\InMemoryNonceStorage;
+use Rasuvaeff\Yii3Webhooks\ReplayGuard;
+
+$guard = new ReplayGuard(new InMemoryNonceStorage());
+$guard->isReplayed($eventId); // bool
+$guard->accept($eventId);     // marks as seen; throws RuntimeException if duplicate
+```
+
+### Delivery tracking
+
+```php
+use Rasuvaeff\Yii3Webhooks\InMemoryDeliveryStorage;
+use Rasuvaeff\Yii3Webhooks\WebhookDelivery;
+use Rasuvaeff\Yii3Webhooks\WebhookRetryPolicy;
+
+$storage = new InMemoryDeliveryStorage();
+$policy = WebhookRetryPolicy::fixed(maxAttempts: 3, delaySeconds: 60);
+// or: WebhookRetryPolicy::exponential(maxAttempts: 5, baseSeconds: 10, cap: 3600)
+
+$delivery = WebhookDelivery::create(event: $event, endpoint: $endpoint);
+$storage->save($delivery);
+
+// After failed attempt:
+$delivery = $delivery->withAttempt($now, error: 'timeout');
+$storage->save($delivery);
+
+if (!$policy->shouldRetry($delivery)) {
+    $storage->markFailed($delivery); // always finalize exhausted deliveries
+}
+
+$policy->shouldRetry($delivery);             // bool
+$policy->isReadyForRetry($delivery, $now);   // bool
+$policy->nextDelaySeconds($delivery->getAttempts()); // seconds until next attempt
+```
+
+`WebhookDeliveryStorage` is the persistence interface. Core provides `InMemoryDeliveryStorage`; production code should use a persistent backend.
+
+### WebhookDispatcher (implement your own)
+
+```php
+interface WebhookDispatcher
+{
+    public function dispatch(WebhookEvent $event, WebhookEndpoint $endpoint): WebhookDelivery;
+}
+```
