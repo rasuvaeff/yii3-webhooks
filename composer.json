@@ -61,6 +61,7 @@
     },
     "scripts": {
         "bc-check": "sh -c 'git config --global --add safe.directory /app 2>/dev/null || true; roave-backward-compatibility-check \"$@\"' --",
+        "bench": "testo -vv",
         "build": [
             "@composer validate --strict",
             "@composer normalize --dry-run",
@@ -80,7 +81,6 @@
             "@rector",
             "@bc-check"
         ],
-        "bench": "testo -vv",
         "require-checker": "composer-require-checker check composer.json",
         "test": "phpunit",
         "test:coverage": "phpunit --coverage-text --coverage-clover=build/coverage.xml",
