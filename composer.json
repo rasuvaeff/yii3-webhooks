@@ -33,6 +33,7 @@
         "phpunit/phpunit": "^11.5",
         "rector/rector": "^2.4",
         "roave/backward-compatibility-check": "^8.0",
+        "testo/bench": "^0.1.5",
         "vimeo/psalm": "^6.16",
         "yiisoft/test-support": "^3.2"
     },
@@ -43,6 +44,7 @@
     },
     "autoload-dev": {
         "psr-4": {
+            "Rasuvaeff\\Yii3Webhooks\\Benchmarks\\": "benchmarks/",
             "Rasuvaeff\\Yii3Webhooks\\Tests\\": "tests/"
         }
     },
@@ -78,6 +80,7 @@
             "@rector",
             "@bc-check"
         ],
+        "bench": "testo -vv",
         "require-checker": "composer-require-checker check composer.json",
         "test": "phpunit",
         "test:coverage": "phpunit --coverage-text --coverage-clover=build/coverage.xml",
