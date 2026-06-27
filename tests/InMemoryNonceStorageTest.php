@@ -4,61 +4,58 @@ declare(strict_types=1);
 
 namespace Rasuvaeff\Yii3Webhooks\Tests;
 
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\Test;
-use PHPUnit\Framework\TestCase;
 use Rasuvaeff\Yii3Webhooks\InMemoryNonceStorage;
+use Testo\Assert;
+use Testo\Codecov\Covers;
+use Testo\Lifecycle\BeforeTest;
+use Testo\Test;
 
-#[CoversClass(InMemoryNonceStorage::class)]
-final class InMemoryNonceStorageTest extends TestCase
+#[Test]
+#[Covers(InMemoryNonceStorage::class)]
+final class InMemoryNonceStorageTest
 {
     private InMemoryNonceStorage $fixture;
 
-    #[\Override]
-    protected function setUp(): void
+    #[BeforeTest]
+    public function setUp(): void
     {
         $this->fixture = new InMemoryNonceStorage();
     }
 
-    #[Test]
     public function returnsFalseForUnknownNonce(): void
     {
-        $this->assertFalse($this->fixture->has('unknown'));
+        Assert::false($this->fixture->has('unknown'));
     }
 
-    #[Test]
     public function addStoresNonceAndReturnsTrue(): void
     {
         $result = $this->fixture->add('nonce-1');
 
-        $this->assertTrue($result);
-        $this->assertTrue($this->fixture->has('nonce-1'));
+        Assert::true($result);
+        Assert::true($this->fixture->has('nonce-1'));
     }
 
-    #[Test]
     public function addReturnsFalseForDuplicateNonce(): void
     {
         $this->fixture->add('nonce-1');
 
-        $this->assertFalse($this->fixture->add('nonce-1'));
+        Assert::false($this->fixture->add('nonce-1'));
     }
 
-    #[Test]
     public function doesNotAffectOtherNonces(): void
     {
         $this->fixture->add('nonce-1');
 
-        $this->assertFalse($this->fixture->has('nonce-2'));
+        Assert::false($this->fixture->has('nonce-2'));
     }
 
-    #[Test]
     public function clearRemovesAllNonces(): void
     {
         $this->fixture->add('nonce-1');
         $this->fixture->add('nonce-2');
         $this->fixture->clear();
 
-        $this->assertFalse($this->fixture->has('nonce-1'));
-        $this->assertFalse($this->fixture->has('nonce-2'));
+        Assert::false($this->fixture->has('nonce-1'));
+        Assert::false($this->fixture->has('nonce-2'));
     }
 }

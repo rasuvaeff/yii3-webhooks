@@ -5,126 +5,127 @@ declare(strict_types=1);
 namespace Rasuvaeff\Yii3Webhooks\Tests;
 
 use InvalidArgumentException;
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\Test;
-use PHPUnit\Framework\TestCase;
 use Rasuvaeff\Yii3Webhooks\WebhookSignature;
+use Testo\Assert;
+use Testo\Codecov\Covers;
+use Testo\Expect;
+use Testo\Test;
 
-#[CoversClass(WebhookSignature::class)]
-final class WebhookSignatureTest extends TestCase
+#[Test]
+#[Covers(WebhookSignature::class)]
+final class WebhookSignatureTest
 {
-    #[Test]
     public function holdsValues(): void
     {
         $sig = new WebhookSignature(timestamp: 1717228800, value: 'abc123');
 
-        $this->assertSame(1717228800, $sig->getTimestamp());
-        $this->assertSame('abc123', $sig->getValue());
+        Assert::same($sig->getTimestamp(), 1717228800);
+        Assert::same($sig->getValue(), 'abc123');
     }
 
-    #[Test]
     public function toHeaderValue(): void
     {
         $sig = new WebhookSignature(timestamp: 1717228800, value: 'abc123def456');
 
-        $this->assertSame('t=1717228800,v1=abc123def456', $sig->toHeaderValue());
+        Assert::same($sig->toHeaderValue(), 't=1717228800,v1=abc123def456');
     }
 
-    #[Test]
     public function parsesFromHeaderValue(): void
     {
         $sig = WebhookSignature::fromHeaderValue('t=1717228800,v1=abc123def456');
 
-        $this->assertSame(1717228800, $sig->getTimestamp());
-        $this->assertSame('abc123def456', $sig->getValue());
+        Assert::same($sig->getTimestamp(), 1717228800);
+        Assert::same($sig->getValue(), 'abc123def456');
     }
 
-    #[Test]
     public function roundTripThroughHeaderValue(): void
     {
         $original = new WebhookSignature(timestamp: 1717228800, value: 'deadbeef');
         $restored = WebhookSignature::fromHeaderValue($original->toHeaderValue());
 
-        $this->assertSame($original->getTimestamp(), $restored->getTimestamp());
-        $this->assertSame($original->getValue(), $restored->getValue());
+        Assert::same($restored->getTimestamp(), $original->getTimestamp());
+        Assert::same($restored->getValue(), $original->getValue());
     }
 
-    #[Test]
     public function throwsOnMissingFields(): void
     {
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Signature header must contain t and v1 fields');
-
-        WebhookSignature::fromHeaderValue('t=1717228800');
+        try {
+            WebhookSignature::fromHeaderValue('t=1717228800');
+            Assert::fail('Expected InvalidArgumentException');
+        } catch (InvalidArgumentException $e) {
+            Assert::string($e->getMessage())->contains('Signature header must contain t and v1 fields');
+        }
     }
 
-    #[Test]
     public function throwsOnMalformedHeader(): void
     {
-        $this->expectException(InvalidArgumentException::class);
+        Expect::exception(InvalidArgumentException::class);
 
         WebhookSignature::fromHeaderValue('not-a-valid-header');
     }
 
-    #[Test]
     public function throwsOnNonNumericTimestamp(): void
     {
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Invalid timestamp in signature header');
-
-        WebhookSignature::fromHeaderValue('t=abc,v1=deadbeef');
+        try {
+            WebhookSignature::fromHeaderValue('t=abc,v1=deadbeef');
+            Assert::fail('Expected InvalidArgumentException');
+        } catch (InvalidArgumentException $e) {
+            Assert::string($e->getMessage())->contains('Invalid timestamp in signature header');
+        }
     }
 
-    #[Test]
     public function throwsOnZeroTimestamp(): void
     {
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Signature timestamp must be positive');
-
-        new WebhookSignature(timestamp: 0, value: 'abc');
+        try {
+            new WebhookSignature(timestamp: 0, value: 'abc');
+            Assert::fail('Expected InvalidArgumentException');
+        } catch (InvalidArgumentException $e) {
+            Assert::string($e->getMessage())->contains('Signature timestamp must be positive');
+        }
     }
 
-    #[Test]
     public function throwsOnNegativeTimestamp(): void
     {
-        $this->expectException(InvalidArgumentException::class);
+        Expect::exception(InvalidArgumentException::class);
 
         new WebhookSignature(timestamp: -1, value: 'abc');
     }
 
-    #[Test]
     public function throwsOnEmptyValue(): void
     {
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Signature value must not be empty');
-
-        new WebhookSignature(timestamp: 1717228800, value: '');
+        try {
+            new WebhookSignature(timestamp: 1717228800, value: '');
+            Assert::fail('Expected InvalidArgumentException');
+        } catch (InvalidArgumentException $e) {
+            Assert::string($e->getMessage())->contains('Signature value must not be empty');
+        }
     }
 
-    #[Test]
     public function parsesFromHeaderValueWithSpacesAroundDelimiters(): void
     {
         $sig = WebhookSignature::fromHeaderValue('t = 1717228800 , v1 = abc123def456');
 
-        $this->assertSame(1717228800, $sig->getTimestamp());
-        $this->assertSame('abc123def456', $sig->getValue());
+        Assert::same($sig->getTimestamp(), 1717228800);
+        Assert::same($sig->getValue(), 'abc123def456');
     }
 
-    #[Test]
     public function throwsOnTimestampWithTrailingNonDigits(): void
     {
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Invalid timestamp in signature header');
-
-        WebhookSignature::fromHeaderValue('t=1234abc,v1=deadbeef');
+        try {
+            WebhookSignature::fromHeaderValue('t=1234abc,v1=deadbeef');
+            Assert::fail('Expected InvalidArgumentException');
+        } catch (InvalidArgumentException $e) {
+            Assert::string($e->getMessage())->contains('Invalid timestamp in signature header');
+        }
     }
 
-    #[Test]
     public function throwsOnTimestampWithLeadingNonDigits(): void
     {
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Invalid timestamp in signature header');
-
-        WebhookSignature::fromHeaderValue('t=abc1234,v1=deadbeef');
+        try {
+            WebhookSignature::fromHeaderValue('t=abc1234,v1=deadbeef');
+            Assert::fail('Expected InvalidArgumentException');
+        } catch (InvalidArgumentException $e) {
+            Assert::string($e->getMessage())->contains('Invalid timestamp in signature header');
+        }
     }
 }

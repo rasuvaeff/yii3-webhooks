@@ -5,16 +5,17 @@ declare(strict_types=1);
 namespace Rasuvaeff\Yii3Webhooks\Tests;
 
 use InvalidArgumentException;
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\DataProvider;
-use PHPUnit\Framework\Attributes\Test;
-use PHPUnit\Framework\TestCase;
 use Rasuvaeff\Yii3Webhooks\WebhookEndpoint;
+use Testo\Assert;
+use Testo\Codecov\Covers;
+use Testo\Data\DataProvider;
+use Testo\Expect;
+use Testo\Test;
 
-#[CoversClass(WebhookEndpoint::class)]
-final class WebhookEndpointTest extends TestCase
+#[Test]
+#[Covers(WebhookEndpoint::class)]
+final class WebhookEndpointTest
 {
-    #[Test]
     public function createsWithRequiredFields(): void
     {
         $endpoint = new WebhookEndpoint(
@@ -22,12 +23,11 @@ final class WebhookEndpointTest extends TestCase
             secret: 'secret123',
         );
 
-        $this->assertSame('https://example.com/webhook', $endpoint->getUrl());
-        $this->assertSame('secret123', $endpoint->getSecret());
-        $this->assertSame([], $endpoint->getHeaders());
+        Assert::same($endpoint->getUrl(), 'https://example.com/webhook');
+        Assert::same($endpoint->getSecret(), 'secret123');
+        Assert::same($endpoint->getHeaders(), []);
     }
 
-    #[Test]
     public function createsWithCustomHeaders(): void
     {
         $endpoint = new WebhookEndpoint(
@@ -36,10 +36,9 @@ final class WebhookEndpointTest extends TestCase
             headers: ['X-Custom' => 'value'],
         );
 
-        $this->assertSame(['X-Custom' => 'value'], $endpoint->getHeaders());
+        Assert::same($endpoint->getHeaders(), ['X-Custom' => 'value']);
     }
 
-    #[Test]
     public function acceptsHttpScheme(): void
     {
         $endpoint = new WebhookEndpoint(
@@ -47,30 +46,29 @@ final class WebhookEndpointTest extends TestCase
             secret: 'secret',
         );
 
-        $this->assertSame('http://example.com/webhook', $endpoint->getUrl());
+        Assert::same($endpoint->getUrl(), 'http://example.com/webhook');
     }
 
-    #[Test]
     public function throwsOnInvalidScheme(): void
     {
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Endpoint URL must use http or https scheme');
-
-        new WebhookEndpoint(url: 'ftp://example.com', secret: 'secret');
+        try {
+            new WebhookEndpoint(url: 'ftp://example.com', secret: 'secret');
+            Assert::fail('Expected InvalidArgumentException');
+        } catch (InvalidArgumentException $e) {
+            Assert::string($e->getMessage())->contains('Endpoint URL must use http or https scheme');
+        }
     }
 
-    #[Test]
     public function throwsOnEmptySecret(): void
     {
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Endpoint secret must not be empty');
-
-        new WebhookEndpoint(url: 'https://example.com', secret: '');
+        try {
+            new WebhookEndpoint(url: 'https://example.com', secret: '');
+            Assert::fail('Expected InvalidArgumentException');
+        } catch (InvalidArgumentException $e) {
+            Assert::string($e->getMessage())->contains('Endpoint secret must not be empty');
+        }
     }
 
-    /**
-     * @return iterable<string, array{string}>
-     */
     public static function invalidSchemeProvider(): iterable
     {
         yield 'ftp' => ['ftp://example.com'];
@@ -79,11 +77,10 @@ final class WebhookEndpointTest extends TestCase
         yield 'empty' => [''];
     }
 
-    #[Test]
     #[DataProvider('invalidSchemeProvider')]
     public function throwsOnNonHttpScheme(string $url): void
     {
-        $this->expectException(InvalidArgumentException::class);
+        Expect::exception(InvalidArgumentException::class);
 
         new WebhookEndpoint(url: $url, secret: 'secret');
     }
