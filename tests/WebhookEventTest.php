@@ -6,15 +6,15 @@ namespace Rasuvaeff\Yii3Webhooks\Tests;
 
 use DateTimeImmutable;
 use InvalidArgumentException;
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\Test;
-use PHPUnit\Framework\TestCase;
 use Rasuvaeff\Yii3Webhooks\WebhookEvent;
+use Testo\Assert;
+use Testo\Codecov\Covers;
+use Testo\Test;
 
-#[CoversClass(WebhookEvent::class)]
-final class WebhookEventTest extends TestCase
+#[Test]
+#[Covers(WebhookEvent::class)]
+final class WebhookEventTest
 {
-    #[Test]
     public function createsViaFactory(): void
     {
         $event = WebhookEvent::create(
@@ -22,21 +22,19 @@ final class WebhookEventTest extends TestCase
             payload: '{"orderId":1}',
         );
 
-        $this->assertSame('order.created', $event->getType());
-        $this->assertSame('{"orderId":1}', $event->getPayload());
-        $this->assertMatchesRegularExpression('/^[0-9a-f]{32}$/', $event->getId());
+        Assert::same($event->getType(), 'order.created');
+        Assert::same($event->getPayload(), '{"orderId":1}');
+        Assert::true(preg_match('/^[0-9a-f]{32}$/', $event->getId()) === 1);
     }
 
-    #[Test]
     public function factoryGeneratesUniqueIds(): void
     {
         $a = WebhookEvent::create(type: 'test', payload: '{}');
         $b = WebhookEvent::create(type: 'test', payload: '{}');
 
-        $this->assertNotSame($a->getId(), $b->getId());
+        Assert::notSame($b->getId(), $a->getId());
     }
 
-    #[Test]
     public function createsWithExplicitOccurredAt(): void
     {
         $at = new DateTimeImmutable('2026-06-01 10:00:00');
@@ -47,34 +45,36 @@ final class WebhookEventTest extends TestCase
             occurredAt: $at,
         );
 
-        $this->assertSame('2026-06-01 10:00:00', $event->getOccurredAt()->format('Y-m-d H:i:s'));
+        Assert::same($event->getOccurredAt()->format('Y-m-d H:i:s'), '2026-06-01 10:00:00');
     }
 
-    #[Test]
     public function throwsOnEmptyId(): void
     {
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Event id must not be empty');
-
-        new WebhookEvent(
-            id: '',
-            type: 'test',
-            payload: '{}',
-            occurredAt: new DateTimeImmutable(),
-        );
+        try {
+            new WebhookEvent(
+                id: '',
+                type: 'test',
+                payload: '{}',
+                occurredAt: new DateTimeImmutable(),
+            );
+            Assert::fail('Expected InvalidArgumentException');
+        } catch (InvalidArgumentException $e) {
+            Assert::string($e->getMessage())->contains('Event id must not be empty');
+        }
     }
 
-    #[Test]
     public function throwsOnEmptyType(): void
     {
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Event type must not be empty');
-
-        new WebhookEvent(
-            id: 'some-id',
-            type: '',
-            payload: '{}',
-            occurredAt: new DateTimeImmutable(),
-        );
+        try {
+            new WebhookEvent(
+                id: 'some-id',
+                type: '',
+                payload: '{}',
+                occurredAt: new DateTimeImmutable(),
+            );
+            Assert::fail('Expected InvalidArgumentException');
+        } catch (InvalidArgumentException $e) {
+            Assert::string($e->getMessage())->contains('Event type must not be empty');
+        }
     }
 }

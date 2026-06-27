@@ -4,24 +4,26 @@ declare(strict_types=1);
 
 namespace Rasuvaeff\Yii3Webhooks\Tests;
 
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\Test;
-use PHPUnit\Framework\TestCase;
 use Rasuvaeff\Yii3Webhooks\InMemoryDeliveryStorage;
 use Rasuvaeff\Yii3Webhooks\WebhookDelivery;
 use Rasuvaeff\Yii3Webhooks\WebhookDeliveryStatus;
 use Rasuvaeff\Yii3Webhooks\WebhookEndpoint;
 use Rasuvaeff\Yii3Webhooks\WebhookEvent;
+use Testo\Assert;
+use Testo\Codecov\Covers;
+use Testo\Lifecycle\BeforeTest;
+use Testo\Test;
 
-#[CoversClass(InMemoryDeliveryStorage::class)]
-final class InMemoryDeliveryStorageTest extends TestCase
+#[Test]
+#[Covers(InMemoryDeliveryStorage::class)]
+final class InMemoryDeliveryStorageTest
 {
     private InMemoryDeliveryStorage $fixture;
     private WebhookEvent $event;
     private WebhookEndpoint $endpoint;
 
-    #[\Override]
-    protected function setUp(): void
+    #[BeforeTest]
+    public function setUp(): void
     {
         $this->fixture = new InMemoryDeliveryStorage();
         $this->event = WebhookEvent::create(type: 'test', payload: '{}');
@@ -40,7 +42,6 @@ final class InMemoryDeliveryStorageTest extends TestCase
         );
     }
 
-    #[Test]
     public function savesAndRetrievesDelivery(): void
     {
         $delivery = WebhookDelivery::create(event: $this->event, endpoint: $this->endpoint);
@@ -49,17 +50,15 @@ final class InMemoryDeliveryStorageTest extends TestCase
 
         $retrieved = $this->fixture->getById($delivery->getId());
 
-        $this->assertNotNull($retrieved);
-        $this->assertSame($delivery->getId(), $retrieved->getId());
+        Assert::notNull($retrieved);
+        Assert::same($retrieved->getId(), $delivery->getId());
     }
 
-    #[Test]
     public function returnsNullForUnknownId(): void
     {
-        $this->assertNull($this->fixture->getById('nonexistent'));
+        Assert::null($this->fixture->getById('nonexistent'));
     }
 
-    #[Test]
     public function findPendingReturnsOnlyPending(): void
     {
         $pending = $this->delivery('del-1');
@@ -70,11 +69,10 @@ final class InMemoryDeliveryStorageTest extends TestCase
 
         $result = $this->fixture->findPending();
 
-        $this->assertCount(1, $result);
-        $this->assertSame('del-1', $result[0]->getId());
+        Assert::count($result, 1);
+        Assert::same($result[0]->getId(), 'del-1');
     }
 
-    #[Test]
     public function findPendingRespectsLimit(): void
     {
         for ($i = 1; $i <= 5; $i++) {
@@ -83,10 +81,9 @@ final class InMemoryDeliveryStorageTest extends TestCase
 
         $result = $this->fixture->findPending(limit: 3);
 
-        $this->assertCount(3, $result);
+        Assert::count($result, 3);
     }
 
-    #[Test]
     public function markDeliveredUpdatesStatus(): void
     {
         $delivery = $this->delivery('del-1');
@@ -96,11 +93,10 @@ final class InMemoryDeliveryStorageTest extends TestCase
 
         $retrieved = $this->fixture->getById('del-1');
 
-        $this->assertNotNull($retrieved);
-        $this->assertSame(WebhookDeliveryStatus::Delivered, $retrieved->getStatus());
+        Assert::notNull($retrieved);
+        Assert::same($retrieved->getStatus(), WebhookDeliveryStatus::Delivered);
     }
 
-    #[Test]
     public function markFailedUpdatesStatus(): void
     {
         $delivery = $this->delivery('del-1');
@@ -110,31 +106,28 @@ final class InMemoryDeliveryStorageTest extends TestCase
 
         $retrieved = $this->fixture->getById('del-1');
 
-        $this->assertNotNull($retrieved);
-        $this->assertSame(WebhookDeliveryStatus::Failed, $retrieved->getStatus());
+        Assert::notNull($retrieved);
+        Assert::same($retrieved->getStatus(), WebhookDeliveryStatus::Failed);
     }
 
-    #[Test]
     public function countReturnsNumberOfDeliveries(): void
     {
-        $this->assertSame(0, $this->fixture->count());
+        Assert::same($this->fixture->count(), 0);
 
         $this->fixture->save($this->delivery('del-1'));
         $this->fixture->save($this->delivery('del-2'));
 
-        $this->assertSame(2, $this->fixture->count());
+        Assert::same($this->fixture->count(), 2);
     }
 
-    #[Test]
     public function clearRemovesAllDeliveries(): void
     {
         $this->fixture->save($this->delivery('del-1'));
         $this->fixture->clear();
 
-        $this->assertSame(0, $this->fixture->count());
+        Assert::same($this->fixture->count(), 0);
     }
 
-    #[Test]
     public function iteratesOverDeliveries(): void
     {
         $this->fixture->save($this->delivery('del-1'));
@@ -146,10 +139,9 @@ final class InMemoryDeliveryStorageTest extends TestCase
             $ids[] = $delivery->getId();
         }
 
-        $this->assertSame(['del-1', 'del-2'], $ids);
+        Assert::same($ids, ['del-1', 'del-2']);
     }
 
-    #[Test]
     public function findPendingReturnsSortedByCreatedAtThenId(): void
     {
         $older = new WebhookDelivery(
@@ -174,11 +166,10 @@ final class InMemoryDeliveryStorageTest extends TestCase
 
         $result = $this->fixture->findPending();
 
-        $this->assertSame('del-older', $result[0]->getId());
-        $this->assertSame('del-newer', $result[1]->getId());
+        Assert::same($result[0]->getId(), 'del-older');
+        Assert::same($result[1]->getId(), 'del-newer');
     }
 
-    #[Test]
     public function findPendingSortsByIdWhenCreatedAtIsEqual(): void
     {
         $sameTime = new \DateTimeImmutable('2026-01-01 10:00:00');
@@ -204,26 +195,24 @@ final class InMemoryDeliveryStorageTest extends TestCase
 
         $result = $this->fixture->findPending();
 
-        $this->assertSame('del-aaa', $result[0]->getId());
-        $this->assertSame('del-zzz', $result[1]->getId());
+        Assert::same($result[0]->getId(), 'del-aaa');
+        Assert::same($result[1]->getId(), 'del-zzz');
     }
 
-    #[Test]
     public function findPendingRespectsDefaultLimitOf100(): void
     {
         for ($i = 1; $i <= 101; $i++) {
             $this->fixture->save($this->delivery('del-' . str_pad((string) $i, 3, '0', STR_PAD_LEFT)));
         }
 
-        $this->assertCount(100, $this->fixture->findPending());
+        Assert::count($this->fixture->findPending(), 100);
     }
 
-    #[Test]
     public function countIsAccessibleViaCountable(): void
     {
         $this->fixture->save($this->delivery('del-1'));
         $this->fixture->save($this->delivery('del-2'));
 
-        $this->assertSame(2, count($this->fixture));
+        Assert::same(count($this->fixture), 2);
     }
 }

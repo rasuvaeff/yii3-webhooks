@@ -6,16 +6,18 @@ namespace Rasuvaeff\Yii3Webhooks\Tests;
 
 use DateTimeImmutable;
 use InvalidArgumentException;
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\Test;
-use PHPUnit\Framework\TestCase;
 use Rasuvaeff\Yii3Webhooks\HmacSha256Signer;
 use Rasuvaeff\Yii3Webhooks\WebhookSignature;
 use Rasuvaeff\Yii3Webhooks\WebhookVerifier;
+use Testo\Assert;
+use Testo\Codecov\Covers;
+use Testo\Lifecycle\BeforeTest;
+use Testo\Test;
 use Yiisoft\Test\Support\Clock\StaticClock;
 
-#[CoversClass(WebhookVerifier::class)]
-final class WebhookVerifierTest extends TestCase
+#[Test]
+#[Covers(WebhookVerifier::class)]
+final class WebhookVerifierTest
 {
     private HmacSha256Signer $signer;
     private StaticClock $clock;
@@ -26,8 +28,8 @@ final class WebhookVerifierTest extends TestCase
     private const string PAYLOAD = '{"orderId":42}';
     private const string EVENT_ID = 'evt-abc123';
 
-    #[\Override]
-    protected function setUp(): void
+    #[BeforeTest]
+    public function setUp(): void
     {
         $this->signer = new HmacSha256Signer();
         $this->clock = new StaticClock(new DateTimeImmutable('@' . self::TIMESTAMP));
@@ -37,7 +39,6 @@ final class WebhookVerifierTest extends TestCase
         );
     }
 
-    #[Test]
     public function verifiesValidSignature(): void
     {
         $signature = $this->signer->sign(
@@ -47,7 +48,7 @@ final class WebhookVerifierTest extends TestCase
             eventId: self::EVENT_ID,
         );
 
-        $this->assertTrue(
+        Assert::true(
             $this->verifier->verify(
                 payload: self::PAYLOAD,
                 secret: self::SECRET,
@@ -57,7 +58,6 @@ final class WebhookVerifierTest extends TestCase
         );
     }
 
-    #[Test]
     public function rejectsInvalidSignatureValue(): void
     {
         $signature = new WebhookSignature(
@@ -65,7 +65,7 @@ final class WebhookVerifierTest extends TestCase
             value: str_repeat('a', 64),
         );
 
-        $this->assertFalse(
+        Assert::false(
             $this->verifier->verify(
                 payload: self::PAYLOAD,
                 secret: self::SECRET,
@@ -75,7 +75,6 @@ final class WebhookVerifierTest extends TestCase
         );
     }
 
-    #[Test]
     public function rejectsWrongSecret(): void
     {
         $signature = $this->signer->sign(
@@ -85,7 +84,7 @@ final class WebhookVerifierTest extends TestCase
             eventId: self::EVENT_ID,
         );
 
-        $this->assertFalse(
+        Assert::false(
             $this->verifier->verify(
                 payload: self::PAYLOAD,
                 secret: self::SECRET,
@@ -95,7 +94,6 @@ final class WebhookVerifierTest extends TestCase
         );
     }
 
-    #[Test]
     public function rejectsWrongEventId(): void
     {
         $signature = $this->signer->sign(
@@ -105,7 +103,7 @@ final class WebhookVerifierTest extends TestCase
             eventId: 'evt-other',
         );
 
-        $this->assertFalse(
+        Assert::false(
             $this->verifier->verify(
                 payload: self::PAYLOAD,
                 secret: self::SECRET,
@@ -115,7 +113,6 @@ final class WebhookVerifierTest extends TestCase
         );
     }
 
-    #[Test]
     public function rejectsExpiredTimestamp(): void
     {
         $oldTimestamp = self::TIMESTAMP - 400; // 400s ago, tolerance is 300s
@@ -127,7 +124,7 @@ final class WebhookVerifierTest extends TestCase
             eventId: self::EVENT_ID,
         );
 
-        $this->assertFalse(
+        Assert::false(
             $this->verifier->verify(
                 payload: self::PAYLOAD,
                 secret: self::SECRET,
@@ -137,7 +134,6 @@ final class WebhookVerifierTest extends TestCase
         );
     }
 
-    #[Test]
     public function acceptsSignatureWithinTolerance(): void
     {
         $recentTimestamp = self::TIMESTAMP - 100; // 100s ago, within 300s tolerance
@@ -149,7 +145,7 @@ final class WebhookVerifierTest extends TestCase
             eventId: self::EVENT_ID,
         );
 
-        $this->assertTrue(
+        Assert::true(
             $this->verifier->verify(
                 payload: self::PAYLOAD,
                 secret: self::SECRET,
@@ -159,7 +155,6 @@ final class WebhookVerifierTest extends TestCase
         );
     }
 
-    #[Test]
     public function rejectsTamperedPayload(): void
     {
         $signature = $this->signer->sign(
@@ -169,7 +164,7 @@ final class WebhookVerifierTest extends TestCase
             eventId: self::EVENT_ID,
         );
 
-        $this->assertFalse(
+        Assert::false(
             $this->verifier->verify(
                 payload: '{"orderId":99}',
                 secret: self::SECRET,
@@ -179,7 +174,6 @@ final class WebhookVerifierTest extends TestCase
         );
     }
 
-    #[Test]
     public function respectsCustomTolerance(): void
     {
         $verifier = new WebhookVerifier(
@@ -197,7 +191,7 @@ final class WebhookVerifierTest extends TestCase
             eventId: self::EVENT_ID,
         );
 
-        $this->assertFalse(
+        Assert::false(
             $verifier->verify(
                 payload: self::PAYLOAD,
                 secret: self::SECRET,
@@ -207,20 +201,20 @@ final class WebhookVerifierTest extends TestCase
         );
     }
 
-    #[Test]
     public function throwsOnNegativeTolerance(): void
     {
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Tolerance seconds must be non-negative');
-
-        new WebhookVerifier(
-            signer: $this->signer,
-            clock: $this->clock,
-            toleranceSeconds: -1,
-        );
+        try {
+            new WebhookVerifier(
+                signer: $this->signer,
+                clock: $this->clock,
+                toleranceSeconds: -1,
+            );
+            Assert::fail('Expected InvalidArgumentException');
+        } catch (InvalidArgumentException $e) {
+            Assert::string($e->getMessage())->contains('Tolerance seconds must be non-negative');
+        }
     }
 
-    #[Test]
     public function allowsZeroTolerance(): void
     {
         $verifier = new WebhookVerifier(
@@ -236,7 +230,7 @@ final class WebhookVerifierTest extends TestCase
             eventId: self::EVENT_ID,
         );
 
-        $this->assertTrue(
+        Assert::true(
             $verifier->verify(
                 payload: self::PAYLOAD,
                 secret: self::SECRET,
@@ -246,7 +240,6 @@ final class WebhookVerifierTest extends TestCase
         );
     }
 
-    #[Test]
     public function acceptsSignatureExactlyAtToleranceBoundary(): void
     {
         $timestamp = self::TIMESTAMP - 300; // age == toleranceSeconds → still accepted
@@ -258,7 +251,7 @@ final class WebhookVerifierTest extends TestCase
             eventId: self::EVENT_ID,
         );
 
-        $this->assertTrue(
+        Assert::true(
             $this->verifier->verify(
                 payload: self::PAYLOAD,
                 secret: self::SECRET,
@@ -268,7 +261,6 @@ final class WebhookVerifierTest extends TestCase
         );
     }
 
-    #[Test]
     public function rejectsSignatureOneSecondOverDefaultTolerance(): void
     {
         $timestamp = self::TIMESTAMP - 301; // age = 301 > default 300
@@ -280,7 +272,7 @@ final class WebhookVerifierTest extends TestCase
             eventId: self::EVENT_ID,
         );
 
-        $this->assertFalse(
+        Assert::false(
             $this->verifier->verify(
                 payload: self::PAYLOAD,
                 secret: self::SECRET,

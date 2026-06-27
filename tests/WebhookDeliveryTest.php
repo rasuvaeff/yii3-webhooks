@@ -6,22 +6,24 @@ namespace Rasuvaeff\Yii3Webhooks\Tests;
 
 use DateTimeImmutable;
 use InvalidArgumentException;
-use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\Test;
-use PHPUnit\Framework\TestCase;
 use Rasuvaeff\Yii3Webhooks\WebhookDelivery;
 use Rasuvaeff\Yii3Webhooks\WebhookDeliveryStatus;
 use Rasuvaeff\Yii3Webhooks\WebhookEndpoint;
 use Rasuvaeff\Yii3Webhooks\WebhookEvent;
+use Testo\Assert;
+use Testo\Codecov\Covers;
+use Testo\Lifecycle\BeforeTest;
+use Testo\Test;
 
-#[CoversClass(WebhookDelivery::class)]
-final class WebhookDeliveryTest extends TestCase
+#[Test]
+#[Covers(WebhookDelivery::class)]
+final class WebhookDeliveryTest
 {
     private WebhookEvent $event;
     private WebhookEndpoint $endpoint;
 
-    #[\Override]
-    protected function setUp(): void
+    #[BeforeTest]
+    public function setUp(): void
     {
         $this->event = WebhookEvent::create(type: 'order.created', payload: '{"orderId":1}');
         $this->endpoint = new WebhookEndpoint(
@@ -30,7 +32,6 @@ final class WebhookDeliveryTest extends TestCase
         );
     }
 
-    #[Test]
     public function createsViaDomainFactory(): void
     {
         $delivery = WebhookDelivery::create(
@@ -38,17 +39,16 @@ final class WebhookDeliveryTest extends TestCase
             endpoint: $this->endpoint,
         );
 
-        $this->assertSame($this->event->getId(), $delivery->getEventId());
-        $this->assertSame($this->event->getType(), $delivery->getEventType());
-        $this->assertSame('https://example.com/webhook', $delivery->getEndpointUrl());
-        $this->assertSame(WebhookDeliveryStatus::Pending, $delivery->getStatus());
-        $this->assertSame(0, $delivery->getAttempts());
-        $this->assertNull($delivery->getLastAttemptAt());
-        $this->assertNull($delivery->getLastError());
-        $this->assertMatchesRegularExpression('/^[0-9a-f]{32}$/', $delivery->getId());
+        Assert::same($delivery->getEventId(), $this->event->getId());
+        Assert::same($delivery->getEventType(), $this->event->getType());
+        Assert::same($delivery->getEndpointUrl(), 'https://example.com/webhook');
+        Assert::same($delivery->getStatus(), WebhookDeliveryStatus::Pending);
+        Assert::same($delivery->getAttempts(), 0);
+        Assert::null($delivery->getLastAttemptAt());
+        Assert::null($delivery->getLastError());
+        Assert::true(preg_match('/^[0-9a-f]{32}$/', $delivery->getId()) === 1);
     }
 
-    #[Test]
     public function createsWithExplicitCreatedAt(): void
     {
         $at = new DateTimeImmutable('2026-06-01 10:00:00');
@@ -59,10 +59,9 @@ final class WebhookDeliveryTest extends TestCase
             createdAt: $at,
         );
 
-        $this->assertSame('2026-06-01 10:00:00', $delivery->getCreatedAt()->format('Y-m-d H:i:s'));
+        Assert::same($delivery->getCreatedAt()->format('Y-m-d H:i:s'), '2026-06-01 10:00:00');
     }
 
-    #[Test]
     public function withAttemptIncrementsAndSetsTimestamp(): void
     {
         $delivery = WebhookDelivery::create(event: $this->event, endpoint: $this->endpoint);
@@ -70,87 +69,87 @@ final class WebhookDeliveryTest extends TestCase
 
         $attempted = $delivery->withAttempt($at);
 
-        $this->assertSame(1, $attempted->getAttempts());
-        $this->assertSame(0, $delivery->getAttempts());
-        $this->assertSame('2026-06-01 12:00:00', $attempted->getLastAttemptAt()?->format('Y-m-d H:i:s'));
-        $this->assertNull($attempted->getLastError());
+        Assert::same($attempted->getAttempts(), 1);
+        Assert::same($delivery->getAttempts(), 0);
+        Assert::same($attempted->getLastAttemptAt()?->format('Y-m-d H:i:s'), '2026-06-01 12:00:00');
+        Assert::null($attempted->getLastError());
     }
 
-    #[Test]
     public function withAttemptSetsError(): void
     {
         $delivery = WebhookDelivery::create(event: $this->event, endpoint: $this->endpoint);
         $attempted = $delivery->withAttempt(new DateTimeImmutable(), error: 'Connection refused');
 
-        $this->assertSame('Connection refused', $attempted->getLastError());
+        Assert::same($attempted->getLastError(), 'Connection refused');
     }
 
-    #[Test]
     public function withStatusReturnsNewInstance(): void
     {
         $delivery = WebhookDelivery::create(event: $this->event, endpoint: $this->endpoint);
         $delivered = $delivery->withStatus(WebhookDeliveryStatus::Delivered);
 
-        $this->assertSame(WebhookDeliveryStatus::Delivered, $delivered->getStatus());
-        $this->assertSame(WebhookDeliveryStatus::Pending, $delivery->getStatus());
+        Assert::same($delivered->getStatus(), WebhookDeliveryStatus::Delivered);
+        Assert::same($delivery->getStatus(), WebhookDeliveryStatus::Pending);
     }
 
-    #[Test]
     public function throwsOnEmptyId(): void
     {
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Delivery id must not be empty');
-
-        new WebhookDelivery(
-            id: '',
-            eventId: 'evt-1',
-            eventType: 'test',
-            endpointUrl: 'https://example.com',
-            status: WebhookDeliveryStatus::Pending,
-            createdAt: new DateTimeImmutable(),
-        );
+        try {
+            new WebhookDelivery(
+                id: '',
+                eventId: 'evt-1',
+                eventType: 'test',
+                endpointUrl: 'https://example.com',
+                status: WebhookDeliveryStatus::Pending,
+                createdAt: new DateTimeImmutable(),
+            );
+            Assert::fail('Expected InvalidArgumentException');
+        } catch (InvalidArgumentException $e) {
+            Assert::string($e->getMessage())->contains('Delivery id must not be empty');
+        }
     }
 
-    #[Test]
     public function throwsOnEmptyEventId(): void
     {
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Delivery eventId must not be empty');
-
-        new WebhookDelivery(
-            id: 'del-1',
-            eventId: '',
-            eventType: 'test',
-            endpointUrl: 'https://example.com',
-            status: WebhookDeliveryStatus::Pending,
-            createdAt: new DateTimeImmutable(),
-        );
+        try {
+            new WebhookDelivery(
+                id: 'del-1',
+                eventId: '',
+                eventType: 'test',
+                endpointUrl: 'https://example.com',
+                status: WebhookDeliveryStatus::Pending,
+                createdAt: new DateTimeImmutable(),
+            );
+            Assert::fail('Expected InvalidArgumentException');
+        } catch (InvalidArgumentException $e) {
+            Assert::string($e->getMessage())->contains('Delivery eventId must not be empty');
+        }
     }
 
-    #[Test]
     public function throwsOnNegativeAttempts(): void
     {
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Attempts must be non-negative');
-
-        new WebhookDelivery(
-            id: 'del-1',
-            eventId: 'evt-1',
-            eventType: 'test',
-            endpointUrl: 'https://example.com',
-            status: WebhookDeliveryStatus::Pending,
-            createdAt: new DateTimeImmutable(),
-            attempts: -1,
-        );
+        try {
+            new WebhookDelivery(
+                id: 'del-1',
+                eventId: 'evt-1',
+                eventType: 'test',
+                endpointUrl: 'https://example.com',
+                status: WebhookDeliveryStatus::Pending,
+                createdAt: new DateTimeImmutable(),
+                attempts: -1,
+            );
+            Assert::fail('Expected InvalidArgumentException');
+        } catch (InvalidArgumentException $e) {
+            Assert::string($e->getMessage())->contains('Attempts must be non-negative');
+        }
     }
 
-    #[Test]
     public function secretNotStoredInDelivery(): void
     {
         $delivery = WebhookDelivery::create(event: $this->event, endpoint: $this->endpoint);
         $serialized = serialize($delivery);
 
-        $this->assertSame('https://example.com/webhook', $delivery->getEndpointUrl());
-        $this->assertStringNotContainsString('secret', $serialized);
+        Assert::same($delivery->getEndpointUrl(), 'https://example.com/webhook');
+        Assert::string($serialized)->notContains('secret');
     }
 }
