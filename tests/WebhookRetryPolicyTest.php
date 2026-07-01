@@ -6,6 +6,9 @@ namespace Rasuvaeff\Yii3Webhooks\Tests;
 
 use DateTimeImmutable;
 use InvalidArgumentException;
+use Rasuvaeff\PropertyTesting\ArbitraryInterface;
+use Rasuvaeff\PropertyTesting\Gen;
+use Rasuvaeff\PropertyTesting\Property;
 use Rasuvaeff\Yii3Webhooks\WebhookDelivery;
 use Rasuvaeff\Yii3Webhooks\WebhookDeliveryStatus;
 use Rasuvaeff\Yii3Webhooks\WebhookEndpoint;
@@ -279,5 +282,69 @@ final class WebhookRetryPolicyTest
         $policy = WebhookRetryPolicy::exponential();
 
         Assert::same($policy->nextDelaySeconds(10), 3600);
+    }
+
+    #[Property(runs: 400)]
+    public function nextDelayStaysWithinZeroAndCap(int $maxAttempts, int $baseSeconds, int $capExtra, float $multiplier, int $attempts): void
+    {
+        $policy = WebhookRetryPolicy::exponential(
+            maxAttempts: $maxAttempts,
+            baseSeconds: $baseSeconds,
+            cap: $baseSeconds + $capExtra,
+            multiplier: $multiplier,
+        );
+        $delay = $policy->nextDelaySeconds($attempts);
+
+        Assert::true($delay >= 0);
+        Assert::true($delay <= $baseSeconds + $capExtra);
+    }
+
+    /** @return array<string, ArbitraryInterface> */
+    private function nextDelayStaysWithinZeroAndCapGenerators(): array
+    {
+        return [
+            'maxAttempts' => Gen::intBetween(1, 50),
+            'baseSeconds' => Gen::intBetween(0, 300),
+            'capExtra' => Gen::intBetween(0, 3_300),
+            'multiplier' => Gen::floatBetween(1.0, 3.0),
+            'attempts' => Gen::intBetween(1, 30),
+        ];
+    }
+
+    #[Property(runs: 300)]
+    public function exhaustedDeliveryIsNeverRetried(int $maxAttempts, int $extra): void
+    {
+        $policy = WebhookRetryPolicy::fixed(maxAttempts: $maxAttempts);
+        $delivery = $this->delivery(attempts: $maxAttempts + $extra);
+
+        Assert::false($policy->shouldRetry($delivery));
+    }
+
+    /** @return array<string, ArbitraryInterface> */
+    private function exhaustedDeliveryIsNeverRetriedGenerators(): array
+    {
+        return [
+            'maxAttempts' => Gen::intBetween(1, 8),
+            'extra' => Gen::intBetween(0, 5),
+        ];
+    }
+
+    #[Property(runs: 300)]
+    public function pendingDeliveryBelowMaxIsRetried(int $attempts, int $slack): void
+    {
+        $maxAttempts = $attempts + $slack;
+        $policy = WebhookRetryPolicy::fixed(maxAttempts: $maxAttempts);
+        $delivery = $this->delivery(attempts: $attempts);
+
+        Assert::true($policy->shouldRetry($delivery));
+    }
+
+    /** @return array<string, ArbitraryInterface> */
+    private function pendingDeliveryBelowMaxIsRetriedGenerators(): array
+    {
+        return [
+            'attempts' => Gen::intBetween(0, 8),
+            'slack' => Gen::intBetween(1, 5),
+        ];
     }
 }
