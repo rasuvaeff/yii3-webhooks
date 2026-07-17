@@ -7,6 +7,7 @@
 [![Psalm Level](https://shepherd.dev/github/rasuvaeff/yii3-webhooks/level.svg)](https://shepherd.dev/github/rasuvaeff/yii3-webhooks)
 [![PHP](https://img.shields.io/packagist/dependency-v/rasuvaeff/yii3-webhooks/php)](https://packagist.org/packages/rasuvaeff/yii3-webhooks)
 [![License](https://poser.pugx.org/rasuvaeff/yii3-webhooks/license)](https://packagist.org/packages/rasuvaeff/yii3-webhooks)
+[Русская версия](README.ru.md)
 
 HMAC-signed webhook infrastructure for Yii3: outbound signing, inbound
 verification, replay protection, and delivery retry policy. It signs the exact
