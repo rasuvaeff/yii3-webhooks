@@ -1,4 +1,5 @@
 # rasuvaeff/yii3-webhooks
+
 [![Stable Version](https://poser.pugx.org/rasuvaeff/yii3-webhooks/v/stable)](https://packagist.org/packages/rasuvaeff/yii3-webhooks)
 [![Total Downloads](https://poser.pugx.org/rasuvaeff/yii3-webhooks/downloads)](https://packagist.org/packages/rasuvaeff/yii3-webhooks)
 [![Build](https://github.com/rasuvaeff/yii3-webhooks/actions/workflows/build.yml/badge.svg)](https://github.com/rasuvaeff/yii3-webhooks/actions)
@@ -6,22 +7,30 @@
 [![Psalm Level](https://shepherd.dev/github/rasuvaeff/yii3-webhooks/level.svg)](https://shepherd.dev/github/rasuvaeff/yii3-webhooks)
 [![PHP](https://img.shields.io/packagist/dependency-v/rasuvaeff/yii3-webhooks/php)](https://packagist.org/packages/rasuvaeff/yii3-webhooks)
 [![License](https://poser.pugx.org/rasuvaeff/yii3-webhooks/license)](https://packagist.org/packages/rasuvaeff/yii3-webhooks)
-Инфраструктура веб-перехватчиков, подписанная HMAC, для Yii3: исходящая подпись, входящая проверка
-, защита от повторного воспроизведения и политика повторной доставки. Он подписывает точные байты полезной нагрузки
-, которые вы отправляете или получаете; нет жесткой зависимости от HTTP-клиента — используйте собственный диспетчер
-.
+[English version](README.md)
 
- > Используете помощника по программированию с искусственным интеллектом? [llms.txt](llms.txt) содержит компактную ссылку на API, которую вы можете использовать. @@ЛИНИЯ@@
+Инфраструктура webhook-ов с HMAC-подписанием для Yii3: исходящая подпись,
+входящая верификация, защита от replay и политика retry доставки. Подписывает
+ровно те байты payload-а, которые вы отправляете или получаете; жёсткой
+зависимости от HTTP-клиента нет — подключайте собственный dispatcher.
+
+> Используете AI-ассистента? В [llms.txt](llms.txt) — компактный API-справочник.
+
 ## Требования
+
 - PHP 8.3+
- - `psr/lock` ^1.0
+- `psr/clock` ^1.0
 
 ## Установка
+
 ```bash
 composer require rasuvaeff/yii3-webhooks
 ```
+
 ## Использование
-### Подписание исходящего вебхука
+
+### Подписание исходящего webhook-а
+
 ```php
 use Rasuvaeff\Yii3Webhooks\HmacSha256Signer;
 use Rasuvaeff\Yii3Webhooks\WebhookEndpoint;
@@ -51,7 +60,9 @@ $signature = $signer->sign(
 // X-Webhook-Signature: t=1717228800,v1=<hmac_hex>
 $header = $signature->toHeaderValue();
 ```
-### Проверка входящего вебхука
+
+### Верификация входящего webhook-а
+
 ```php
 use Rasuvaeff\Yii3Webhooks\HmacSha256Signer;
 use Rasuvaeff\Yii3Webhooks\WebhookSignature;
@@ -76,10 +87,13 @@ $valid = $verifier->verify(
     eventId: $eventId,
 );
 ```
-### Защита от повтора
-Используйте идентификатор события (из заголовка `X-Webhook-Id`) в качестве nonce — он уникально
- идентифицирует доставку и позволяет обнаруживать повторы независимо от проверки подписи
-. @@ЛИНИЯ@@
+
+### Защита от replay
+
+Используйте id события (из заголовка `X-Webhook-Id`) как nonce — он однозначно
+идентифицирует доставку и позволяет обнаруживать replay независимо от
+верификации подписи.
+
 ```php
 use Rasuvaeff\Yii3Webhooks\InMemoryNonceStorage;
 use Rasuvaeff\Yii3Webhooks\ReplayGuard;
@@ -92,7 +106,9 @@ if ($valid) {
     // process the webhook...
 }
 ```
-### Отслеживание поставок
+
+### Отслеживание доставок
+
 ```php
 use Rasuvaeff\Yii3Webhooks\InMemoryDeliveryStorage;
 use Rasuvaeff\Yii3Webhooks\WebhookDelivery;
@@ -113,137 +129,180 @@ if ($policy->isReadyForRetry($delivery, $clock->now())) {
     // retry...
 }
 ```
-## Справочник по API
-### ВебхукСобытие
-| Метод | Описание |
- |---|---|
- | `create (тип, полезная нагрузка, произошло?)` | Фабрика с автоматически сгенерированным идентификатором |
- | `getId()` | 32-значный шестнадцатеричный идентификатор |
- | `getType()` | Строка типа события |
- | `getPayload()` | Необработанные байты полезной нагрузки для подписи и доставки |
- | `getOccurredAt()` | `DateTimeImmutable` | @@ЛИНИЯ@@
-### ВебхукКонечная точка
-| Метод | Описание |
- |---|---|
- | `__construct(url, secret, headers?)` | URL-адрес должен использовать http/https; секретный непустой |
- | `getUrl()` | URL-адрес конечной точки |
- | `getSecret()` | Общий секрет (не хранится при доставке) |
- | `getHeaders()` | Дополнительные заголовки запросов | @@ЛИНИЯ@@
-### ВебхукПодпись
-| Метод | Описание |
- |---|---|
- | `__construct(метка времени, значение)` | Положительная временная метка, непустое значение |
- | `fromHeaderValue(заголовок)` | Разобрать формат `t=...,v1=...` |
- | `toHeaderValue()` | Сериализовать в формат `t=...,v1=...` |
- | `getTimestamp()` | Временная метка Unix |
- | `getValue()` | Шестнадцатеричная строка HMAC | @@ЛИНИЯ@@
-### Вебхукподписчик
-Интерфейс для реализации исходящей подписи. Пользовательские подписывающие лица должны подписать точные байты полезной нагрузки и вернуть WebhookSignature.
 
- | Метод | Описание |
- |---|---|
- | `sign(payload, secret, timestamp, eventId)` | Возвращает `WebhookSignature` | @@ЛИНИЯ@@
-### HmacSha256подписавшийся
-Подписывает `"{eventId}.{timestamp}.{payload}"` с секретом, используя HMAC-SHA256. `payload` — это точная строка тела HTTP, а не перекодированное значение JSON.
+## API-справочник
 
- | Метод | Описание |
- |---|---|
- | `sign(payload, secret, timestamp, eventId)` | Возвращает `WebhookSignature` | @@ЛИНИЯ@@
-### ВебхукVerifier
-| Метод | Описание |
- |---|---|
- | `__construct(подписавший, часы, толерантные секунды?)` | Допуск по умолчанию: 300 с |
- | `verify(полезная нагрузка, секрет, подпись, eventId)` | Возвращает `bool`; использует `hash_equals` | @@ЛИНИЯ@@
-### ВебхукRetryPolicy
-| Метод | Описание |
- |---|---|
- | `fixed(maxAttempts?, DelaySeconds?)` | Постоянная задержка; по умолчанию: 3 попытки, 60 с |
- | `экспоненциальный(maxAttempts?, baseSeconds?, cap?, множитель?)` | Двойная задержка; по умолчанию: 5 попыток, база 10 с, ограничение 3600 с |
- | `getMaxAttempts()` | Максимальное количество повторных попыток |
- | `nextDelaySeconds(попытки)` | Задержка перед следующей попыткой; `attempts` = текущее количество попыток |
- | `следуетПовторить(доставка)` | Возвращает true, если статус «Ожидание» и количество попыток < maxAttempts |
- | `isReadyForRetry(доставка, сейчас)` | Возвращает true, когда задержка истекла | @@ЛИНИЯ@@
-### ВебхукДоставка
-| Метод | Описание |
- |---|---|
- | `create(событие, конечная точка, создано?)` | Фабрика; хранит только URL (без секрета) |
- | `getId()` | 32-значный шестнадцатеричный идентификатор |
- | `getEventId()` | Идентификатор исходного события |
- | `getEventType()` | Тип исходного события |
- | `getEndpointUrl()` | URL-адрес конечной точки |
- | `getStatus()` | Перечисление `WebhookDeliveryStatus` |
- | `getCreatedAt()` | Время создания DateTimeImmutable |
- | `getAttempts()` | Количество попыток |
- | `getLastAttemptAt()` | `?DateTimeImmutable` |
- | `getLastError()` | `?строка` |
- | `withAttempt(at, error?)` | Возвращает новый экземпляр с увеличенными попытками |
- | `withStatus(статус)` | Возвращает новый экземпляр с обновленным статусом | @@ЛИНИЯ@@
-### ВебхукДоставкаХранилище
-Интерфейс для бэкэндов персистентности. Core поставляет InMemoryDeliveryStorage для тестов; используйте постоянный бэкэнд в производстве.
+### WebhookEvent
 
- | Метод | Описание |
- |---|---|
- | `сохранить(доставка)` | Хранит запись попытки доставки |
- | `findPending(лимит)` | Возврат в ожидании поставки |
- | `markDelivered(доставка)` | Отмечает доставку как доставленную |
- | `markFailed(доставка)` | Помечает доставку как неудавшуюся |
- | `getById(id)` | Загружает доставку по ID | @@ЛИНИЯ@@
+| Метод | Описание |
+|---|---|
+| `create(type, payload, occurredAt?)` | Фабрика с автоматически сгенерированным ID |
+| `getId()` | 32-символьный hex ID |
+| `getType()` | Строковый тип события |
+| `getPayload()` | Сырые байты payload-а для подписания и доставки |
+| `getOccurredAt()` | `DateTimeImmutable` |
+
+### WebhookEndpoint
+
+| Метод | Описание |
+|---|---|
+| `__construct(url, secret, headers?)` | URL обязан использовать http/https; secret — непустой |
+| `getUrl()` | URL эндпоинта |
+| `getSecret()` | Shared secret (не сохраняется в delivery) |
+| `getHeaders()` | Дополнительные заголовки запроса |
+
+### WebhookSignature
+
+| Метод | Описание |
+|---|---|
+| `__construct(timestamp, value)` | Положительный timestamp, непустое value |
+| `fromHeaderValue(header)` | Разбирает формат `t=...,v1=...` |
+| `toHeaderValue()` | Сериализует в формат `t=...,v1=...` |
+| `getTimestamp()` | Unix timestamp |
+| `getValue()` | Hex-строка HMAC |
+
+### WebhookSigner
+
+Интерфейс реализаций исходящей подписи. Кастомные signer-ы обязаны подписывать
+ровно байты payload-а и возвращать `WebhookSignature`.
+
+| Метод | Описание |
+|---|---|
+| `sign(payload, secret, timestamp, eventId)` | Возвращает `WebhookSignature` |
+
+### HmacSha256Signer
+
+Подписывает `"{eventId}.{timestamp}.{payload}"` секретом через HMAC-SHA256.
+`payload` — это исходная строка HTTP-тела, а не пересериализованное JSON-значение.
+
+| Метод | Описание |
+|---|---|
+| `sign(payload, secret, timestamp, eventId)` | Возвращает `WebhookSignature` |
+
+### WebhookVerifier
+
+| Метод | Описание |
+|---|---|
+| `__construct(signer, clock, toleranceSeconds?)` | Допуск по умолчанию: 300 с |
+| `verify(payload, secret, signature, eventId)` | Возвращает `bool`; использует `hash_equals` |
+
+### WebhookRetryPolicy
+
+| Метод | Описание |
+|---|---|
+| `fixed(maxAttempts?, delaySeconds?)` | Постоянная задержка; по умолчанию: 3 попытки, 60 с |
+| `exponential(maxAttempts?, baseSeconds?, cap?, multiplier?)` | Удваивающаяся задержка; по умолчанию: 5 попыток, base 10 с, cap 3600 с |
+| `getMaxAttempts()` | Максимум попыток retry |
+| `nextDelaySeconds(attempts)` | Задержка перед следующей попыткой; `attempts` = текущее количество попыток |
+| `shouldRetry(delivery)` | Возвращает `true`, если статус `Pending` и `attempts < maxAttempts` |
+| `isReadyForRetry(delivery, now)` | Возвращает `true`, когда задержка истекла |
+
+### WebhookDelivery
+
+| Метод | Описание |
+|---|---|
+| `create(event, endpoint, createdAt?)` | Фабрика; хранит только URL (без секрета) |
+| `getId()` | 32-символьный hex ID |
+| `getEventId()` | ID исходного события |
+| `getEventType()` | Тип исходного события |
+| `getEndpointUrl()` | URL эндпоинта |
+| `getStatus()` | enum `WebhookDeliveryStatus` |
+| `getCreatedAt()` | `DateTimeImmutable` времени создания |
+| `getAttempts()` | Количество попыток |
+| `getLastAttemptAt()` | `?DateTimeImmutable` |
+| `getLastError()` | `?string` |
+| `withAttempt(at, error?)` | Возвращает новый экземпляр с инкрементированным счётчиком попыток |
+| `withStatus(status)` | Возвращает новый экземпляр с обновлённым статусом |
+
+### WebhookDeliveryStorage
+
+Интерфейс backend-ов персистентности. В ядре поставляется
+`InMemoryDeliveryStorage` для тестов; в проде используйте персистентный backend.
+
+| Метод | Описание |
+|---|---|
+| `save(delivery)` | Сохраняет запись о попытке доставки |
+| `findPending(limit)` | Возвращает доставки в статусе `Pending` |
+| `markDelivered(delivery)` | Помечает доставку как `Delivered` |
+| `markFailed(delivery)` | Помечает доставку как `Failed` |
+| `getById(id)` | Загружает доставку по ID |
+
 ### ReplayGuard
+
 | Метод | Описание |
- |---|---|
- | `__construct(NonceStorage)` | Хранилище должно атомарно отклонять повторяющиеся одноразовые номера |
- | `isReplayed(nonce)` | Возвращает `bool` |
- | `принять (одноразовый номер)` | Отмечает как просмотренное; выдает `RuntimeException`, если дублируется | @@ЛИНИЯ@@
-### Статус вебхукаДоставка
-Поддерживаемое перечисление строк с тремя регистрами:
+|---|---|
+| `__construct(NonceStorage)` | Хранилище обязано атомарно отклонять дубликаты nonce |
+| `isReplayed(nonce)` | Возвращает `bool` |
+| `accept(nonce)` | Помечает nonce как замеченный; бросает `RuntimeException` при дубликате |
 
- | Дело | Значение |
- |---|---|
- | `В ожидании` | `'ожидает'` |
- | `Доставлено` | `'доставлено'` |
- | `Не удалось` | `'не удалось'` | @@ЛИНИЯ@@
-### ВебхукДиспетчер
-Интерфейс для реализаций транспорта HTTP. В комплект поставки не входит конкретный диспетчер — приносите свой (Жур, ПСР-18 и т.п.).
+### WebhookDeliveryStatus
 
- | Метод | Описание |
- |---|---|
- | `отправка(событие, конечная точка)` | Отправляет подписанный вебхук; возвращает `WebhookDelivery` | @@ЛИНИЯ@@
+Backed string enum с тремя случаями:
+
+| Case | Value |
+|---|---|
+| `Pending` | `'pending'` |
+| `Delivered` | `'delivered'` |
+| `Failed` | `'failed'` |
+
+### WebhookDispatcher
+
+Интерфейс реализаций HTTP-транспорта. В пакете нет конкретного dispatcher-а —
+подключайте собственный (Guzzle, PSR-18 и т.п.).
+
+| Метод | Описание |
+|---|---|
+| `dispatch(event, endpoint)` | Отправляет подписанный webhook; возвращает `WebhookDelivery` |
+
 ### NonceStorage
-Интерфейс для серверов хранения данных с защитой от повторного воспроизведения. Реализации должны атомарно отклонять повторяющиеся одноразовые номера.
 
- | Метод | Описание |
- |---|---|
- | `имеет(одноразовый номер)` | Возвращает true, если одноразовый номер уже был замечен |
- | `добавить(одноразовый номер)` | Хранит одноразовый номер; возвращает false, если дублируется | @@ЛИНИЯ@@
+Интерфейс backend-ов хранения nonce для защиты от replay. Реализации обязаны
+атомарно отклонять дубликаты nonce.
+
+| Метод | Описание |
+|---|---|
+| `has(nonce)` | Возвращает `true`, если nonce уже встречался |
+| `add(nonce)` | Сохраняет nonce; возвращает `false` при дубликате |
+
 ### InMemoryNonceStorage
-Реализация NonceStorage только для тестирования. Небезопасен для производственного использования.
 
- | Метод | Описание |
- |---|---|
- | `имеет(одноразовый номер)` | Возвращает `bool` |
- | `добавить(одноразовый номер)` | Возвращает false для дубликатов |
- | `очистить()` | Удаляет все сохраненные одноразовые номера | @@ЛИНИЯ@@
+Реализация `NonceStorage` только для тестов. Не подходит для production.
+
+| Метод | Описание |
+|---|---|
+| `has(nonce)` | Возвращает `bool` |
+| `add(nonce)` | Возвращает `false` при дубликате |
+| `clear()` | Удаляет все сохранённые nonce |
+
 ### InMemoryDeliveryStorage
-Реализация WebhookDeliveryStorage только для тестирования. Реализует IteratorAggregate и Countable для упрощения проверки.
 
- | Метод | Описание |
- |---|---|
- | `сохранить(доставка)` | Магазины запись о доставке |
- | `findPending(лимит)` | Возврат в ожидании поставки |
- | `markDelivered(доставка)` | Устанавливает статус «Доставлено» |
- | `markFailed(доставка)` | Устанавливает статус «Не удалось» |
- | `getById(id)` | Загружает доставку по ID |
- | `очистить()` | Удаляет все записи | @@ЛИНИЯ@@
+Реализация `WebhookDeliveryStorage` только для тестов. Реализует
+`IteratorAggregate` и `Countable` для удобной инспекции.
+
+| Метод | Описание |
+|---|---|
+| `save(delivery)` | Сохраняет запись о доставке |
+| `findPending(limit)` | Возвращает доставки в статусе `Pending` |
+| `markDelivered(delivery)` | Устанавливает статус `Delivered` |
+| `markFailed(delivery)` | Устанавливает статус `Failed` |
+| `getById(id)` | Загружает доставку по ID |
+| `clear()` | Удаляет все записи |
+
 ## Безопасность
-— Для сравнения сигнатур используется hash_equals() — защита от атак по времени.
- — `WebhookDelivery` сохраняет только URL-адрес конечной точки, но не секрет.
- — Все секретные параметры отмечены `#[\SensitiveParameter]` — они не отображаются в трассировках стека.
- — Всегда проверяйте временные метки (допуск), чтобы предотвратить повторное использование старых подписей.
- — используйте ReplayGuard с постоянным хранилищем NonceStorage в рабочей среде; Реализации хранилища
- должны отклонять дубликаты атомарно. @@ЛИНИЯ@@
+
+- Сравнение подписей использует `hash_equals()` — защита от timing-атак.
+- `WebhookDelivery` хранит только URL эндпоинта, но не секрет.
+- Все параметры-секреты помечены `#[\SensitiveParameter]` — они не появятся в stack trace.
+- Всегда валидируйте timestamp (допуск), чтобы предотвратить replay старых подписей.
+- Используйте `ReplayGuard` с персистентным `NonceStorage` в production; реализации
+  хранилища обязаны атомарно отклонять дубликаты.
+
 ## Примеры
-См. [examples/](examples/) для полных примеров использования. @@ЛИНИЯ@@
+
+Полные примеры использования — см. [examples/](examples/).
+
 ## Разработка
+
 ```bash
 make install
 make build
@@ -253,7 +312,10 @@ make test-coverage
 make mutation
 make release-check
 ```
-`make test-coverage` и `makemutation` загружают `pcov` внутри контейнера
- `composer:2`, поскольку базовый образ не имеет драйвера покрытия. @@ЛИНИЯ@@
+
+`make test-coverage` и `make mutation` поднимают `pcov` внутри контейнера
+`composer:2`, потому что в базовом образе нет драйвера покрытия.
+
 ## Лицензия
-BSD-3-пункт. См. [LICENSE.md](LICENSE.md).
+
+BSD-3-Clause. См. [LICENSE.md](LICENSE.md).
