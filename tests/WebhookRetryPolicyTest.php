@@ -300,7 +300,7 @@ final class WebhookRetryPolicyTest
     }
 
     /** @return array<string, ArbitraryInterface> */
-    private function nextDelayStaysWithinZeroAndCapGenerators(): array
+    public static function nextDelayStaysWithinZeroAndCapGenerators(): array
     {
         return [
             'maxAttempts' => Gen::intBetween(1, 50),
@@ -321,7 +321,7 @@ final class WebhookRetryPolicyTest
     }
 
     /** @return array<string, ArbitraryInterface> */
-    private function exhaustedDeliveryIsNeverRetriedGenerators(): array
+    public static function exhaustedDeliveryIsNeverRetriedGenerators(): array
     {
         return [
             'maxAttempts' => Gen::intBetween(1, 8),
@@ -340,7 +340,7 @@ final class WebhookRetryPolicyTest
     }
 
     /** @return array<string, ArbitraryInterface> */
-    private function pendingDeliveryBelowMaxIsRetriedGenerators(): array
+    public static function pendingDeliveryBelowMaxIsRetriedGenerators(): array
     {
         return [
             'attempts' => Gen::intBetween(0, 8),
