@@ -42,7 +42,14 @@ retry policy for webhooks. No HTTP client dependency — you implement
    Reject the request yourself on `false`. Timestamp tolerance
    (`toleranceSeconds`, default in examples 300) bounds the replay window.
 
-5. **Finalize exhausted deliveries.** When `WebhookRetryPolicy::shouldRetry()`
+5. **Pass the domain event's id to `WebhookEvent::create(id: ...)`.** That id
+   leaves in `X-Webhook-Id` and is the receiver's deduplication key — if the
+   package generates one, a republish of the same domain event arrives under a
+   new id and the receiver cannot tell it is a duplicate. Omitted, the id is 32
+   random hex characters. `WebhookDelivery::create(id: ...)` exists too; keep
+   it within 32 characters, the column width in `yii3-webhooks-db`.
+
+6. **Finalize exhausted deliveries.** When `WebhookRetryPolicy::shouldRetry()`
    is `false`, call `$storage->markFailed($delivery)` — otherwise the delivery
    stays `Pending` forever.
 

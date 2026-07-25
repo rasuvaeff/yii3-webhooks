@@ -67,6 +67,17 @@ make release-check
 
 ## Invariants & gotchas
 
+- **Event id belongs to the domain, not to this package.** It leaves in
+  `X-Webhook-Id` and is the receiver's deduplication key, so
+  `WebhookEvent::create(id: ...)` should carry the domain event's identifier;
+  omitted, it falls back to 32 random hex characters. There is deliberately no
+  id-generator interface (unlike `yii3-outbox`): `WebhookDispatcher` is an
+  interface, so no object in this package could hold one — the application owns
+  id policy and the README shows the wrapper-factory recipe.
+- **Delivery ids must stay within 32 characters** — the `id` column width in
+  `yii3-webhooks-db`. Nothing derives meaning from the id's shape (the storage
+  uses it only as an equality condition), so `create(id: ...)` is pure
+  convenience, but the ceiling is real.
 - Canonical message for signing: `"{eventId}.{timestamp}.{payload}"` where
   `eventId` is sent as `X-Webhook-Id` header, and `payload` is the exact raw
   body string. Do not re-encode JSON before verification.

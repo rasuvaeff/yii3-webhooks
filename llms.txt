@@ -8,6 +8,13 @@ composer require rasuvaeff/yii3-webhooks
 
 ## Rules
 
+- Event id goes to the receiver as `X-Webhook-Id` and is their dedup key:
+  pass `id:` (the domain event's id) when the webhook mirrors one, otherwise a
+  republish arrives under a new id. Omitted => 32 random hex chars.
+- No id generator is bound: `WebhookDispatcher` is an interface, so the app
+  owns id policy. `WebhookDelivery::create(id:)` exists too — keep it <= 32
+  chars, the column width in yii3-webhooks-db.
+
 - Sign outbound: `HmacSha256Signer::sign(payload, secret, timestamp, eventId)` → `WebhookSignature`.
 - Canonical message: `"{eventId}.{timestamp}.{payload}"`, where `payload` is the exact HTTP body string.
 - Send `X-Webhook-Id: {eventId}` and `X-Webhook-Signature: t={ts},v1={hex}` headers.
@@ -31,6 +38,8 @@ use Rasuvaeff\Yii3Webhooks\WebhookEvent;
 $event = WebhookEvent::create(
     type: 'order.created',
     payload: json_encode(['orderId' => 42]),
+    occurredAt: $clock->now(),   // optional
+    id: $domainEvent->getId(),   // optional; omitted => 32-char hex
 );
 
 $signer = new HmacSha256Signer();
@@ -81,7 +90,7 @@ $storage = new InMemoryDeliveryStorage();
 $policy = WebhookRetryPolicy::fixed(maxAttempts: 3, delaySeconds: 60);
 // or: WebhookRetryPolicy::exponential(maxAttempts: 5, baseSeconds: 10, cap: 3600)
 
-$delivery = WebhookDelivery::create(event: $event, endpoint: $endpoint);
+$delivery = WebhookDelivery::create(event: $event, endpoint: $endpoint); // + optional createdAt:, id:
 $storage->save($delivery);
 
 // After failed attempt:
