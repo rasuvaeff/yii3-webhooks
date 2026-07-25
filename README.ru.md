@@ -62,6 +62,50 @@ $signature = $signer->sign(
 $header = $signature->toHeaderValue();
 ```
 
+### Идентификаторы событий
+
+Id события уезжает получателю в `X-Webhook-Id` — именно по нему он
+дедуплицирует. Если webhook отражает доменное событие, у которого
+идентификатор уже есть, передайте его: иначе повторная публикация того же
+доменного события приедет под новым id, и обработка ретраев на стороне
+получателя перестанет работать:
+
+```php
+$event = WebhookEvent::create(
+    type: 'order.created',
+    payload: $json,
+    id: $domainEvent->getId(),
+);
+```
+
+Без `id` он остаётся 32 случайными hex-символами, как и в прошлых версиях.
+
+В отличие от [rasuvaeff/yii3-outbox](https://github.com/rasuvaeff/yii3-outbox),
+этот пакет не биндит генератор id: `WebhookDispatcher` — интерфейс, и объект,
+который держал бы генератор, принадлежит приложению. Если нужна единая схема
+id по всему проекту, оберните фабрику:
+
+```php
+final readonly class EventFactory
+{
+    public function __construct(private ClockInterface $clock) {}
+
+    public function create(string $type, string $payload): WebhookEvent
+    {
+        return WebhookEvent::create(
+            type: $type,
+            payload: $payload,
+            occurredAt: $this->clock->now(),
+            id: Uuid::v7()->toRfc4122(), // symfony/uid или ramsey/uuid — на ваш выбор
+        );
+    }
+}
+```
+
+`WebhookDelivery::create()` тоже принимает `id` — для приложений, которые сами
+генерируют идентификаторы записей о доставке. Держите их в пределах 32
+символов: такова ширина колонки в `rasuvaeff/yii3-webhooks-db`.
+
 ### Верификация входящего webhook-а
 
 ```php
@@ -137,7 +181,7 @@ if ($policy->isReadyForRetry($delivery, $clock->now())) {
 
 | Метод | Описание |
 |---|---|
-| `create(type, payload, occurredAt?)` | Фабрика с автоматически сгенерированным ID |
+| `create(type, payload, occurredAt?, id?)` | Фабрика; `id` — идентификатор доменного события, без него → 32-символьный hex |
 | `getId()` | 32-символьный hex ID |
 | `getType()` | Строковый тип события |
 | `getPayload()` | Сырые байты payload-а для подписания и доставки |
@@ -202,7 +246,7 @@ if ($policy->isReadyForRetry($delivery, $clock->now())) {
 
 | Метод | Описание |
 |---|---|
-| `create(event, endpoint, createdAt?)` | Фабрика; хранит только URL (без секрета) |
+| `create(event, endpoint, createdAt?, id?)` | Фабрика; хранит только URL (без секрета). `id` — не длиннее 32 символов (ширина колонки в БД) |
 | `getId()` | 32-символьный hex ID |
 | `getEventId()` | ID исходного события |
 | `getEventType()` | Тип исходного события |

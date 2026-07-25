@@ -27,13 +27,20 @@ final readonly class WebhookEvent
         }
     }
 
+    /**
+     * @param ?string $id the domain event's identifier when this webhook mirrors
+     *                    one — receivers deduplicate on it, so a republish of the
+     *                    same domain event must not arrive under a new id;
+     *                    null generates 32 random hex characters
+     */
     public static function create(
         string $type,
         string $payload,
         ?DateTimeImmutable $occurredAt = null,
+        ?string $id = null,
     ): self {
         return new self(
-            id: bin2hex(random_bytes(16)),
+            id: $id ?? bin2hex(random_bytes(16)),
             type: $type,
             payload: $payload,
             occurredAt: $occurredAt ?? new DateTimeImmutable(),

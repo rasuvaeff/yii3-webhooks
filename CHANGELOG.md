@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.2.0 — 2026-07-25
+
+- `WebhookEvent::create()` accepts an optional `id`. The event id travels to
+  the receiver in `X-Webhook-Id` and is what they deduplicate on, so a webhook
+  mirroring a domain event should carry that event's identifier — otherwise a
+  republish arrives under a new id and the receiver's retry handling is
+  defeated. Omitted, the id stays 32 random hex characters.
+- `WebhookDelivery::create()` accepts an optional `id` as well, for
+  applications that generate delivery record ids themselves. Keep it within 32
+  characters — the column width in `rasuvaeff/yii3-webhooks-db`.
+- No id generator interface here, unlike `rasuvaeff/yii3-outbox`:
+  `WebhookDispatcher` is an interface and the application owns the object that
+  would hold one. The README shows the wrapper factory for a project-wide id
+  scheme.
+
 ## 1.1.0 — 2026-07-25
 
 - Ship an AI agent skill (`resources/skills/rasuvaeff-yii3-webhooks/SKILL.md` +

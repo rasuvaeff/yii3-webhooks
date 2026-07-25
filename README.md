@@ -62,6 +62,49 @@ $signature = $signer->sign(
 $header = $signature->toHeaderValue();
 ```
 
+### Event ids
+
+The event id travels to the receiver in `X-Webhook-Id` and is what they
+deduplicate on. When a webhook mirrors a domain event that already has an
+identifier, pass it — otherwise a republish of the same domain event arrives
+under a new id and the receiver's retry handling is defeated:
+
+```php
+$event = WebhookEvent::create(
+    type: 'order.created',
+    payload: $json,
+    id: $domainEvent->getId(),
+);
+```
+
+Omitted, the id is 32 random hex characters, unchanged from previous versions.
+
+Unlike [rasuvaeff/yii3-outbox](https://github.com/rasuvaeff/yii3-outbox), this
+package binds no id generator: `WebhookDispatcher` is an interface and the
+application owns the object that would hold one. For a house-wide id scheme,
+wrap the factory:
+
+```php
+final readonly class EventFactory
+{
+    public function __construct(private ClockInterface $clock) {}
+
+    public function create(string $type, string $payload): WebhookEvent
+    {
+        return WebhookEvent::create(
+            type: $type,
+            payload: $payload,
+            occurredAt: $this->clock->now(),
+            id: Uuid::v7()->toRfc4122(), // symfony/uid or ramsey/uuid, your call
+        );
+    }
+}
+```
+
+`WebhookDelivery::create()` takes `id` too, for applications that generate
+delivery record ids themselves. Keep those within 32 characters — that is the
+column width in `rasuvaeff/yii3-webhooks-db`.
+
 ### Verifying an inbound webhook
 
 ```php
@@ -137,7 +180,7 @@ if ($policy->isReadyForRetry($delivery, $clock->now())) {
 
 | Method | Description |
 |---|---|
-| `create(type, payload, occurredAt?)` | Factory with auto-generated ID |
+| `create(type, payload, occurredAt?, id?)` | Factory; `id` = the domain event's id, omitted → 32-char hex |
 | `getId()` | 32-char hex ID |
 | `getType()` | Event type string |
 | `getPayload()` | Raw payload bytes to sign and deliver |
@@ -200,7 +243,7 @@ Signs `"{eventId}.{timestamp}.{payload}"` with the secret using HMAC-SHA256. `pa
 
 | Method | Description |
 |---|---|
-| `create(event, endpoint, createdAt?)` | Factory; stores URL only (no secret) |
+| `create(event, endpoint, createdAt?, id?)` | Factory; stores URL only (no secret). Keep `id` ≤ 32 chars (DB column width) |
 | `getId()` | 32-char hex ID |
 | `getEventId()` | Source event ID |
 | `getEventType()` | Source event type |

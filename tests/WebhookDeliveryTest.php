@@ -49,6 +49,24 @@ final class WebhookDeliveryTest
         Assert::true(preg_match('/^[0-9a-f]{32}$/', $delivery->getId()) === 1);
     }
 
+    public function factoryAcceptsAnExplicitId(): void
+    {
+        $delivery = WebhookDelivery::create(
+            event: $this->event,
+            endpoint: $this->endpoint,
+            id: 'delivery-1',
+        );
+
+        Assert::same($delivery->getId(), 'delivery-1');
+    }
+
+    public function factoryKeepsTheHistoricalFormatWithoutAnId(): void
+    {
+        $delivery = WebhookDelivery::create(event: $this->event, endpoint: $this->endpoint);
+
+        Assert::same(preg_match('/^[0-9a-f]{32}$/', $delivery->getId()), 1);
+    }
+
     public function createsWithExplicitCreatedAt(): void
     {
         $at = new DateTimeImmutable('2026-06-01 10:00:00');

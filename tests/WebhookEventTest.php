@@ -35,6 +35,20 @@ final class WebhookEventTest
         Assert::notSame($b->getId(), $a->getId());
     }
 
+    public function factoryAcceptsTheDomainEventId(): void
+    {
+        // receivers deduplicate on this id: republishing the same domain event
+        // must not arrive as a different webhook event
+        $event = WebhookEvent::create(type: 'order.created', payload: '{}', id: 'order-created-42');
+
+        Assert::same($event->getId(), 'order-created-42');
+    }
+
+    public function factoryKeepsTheHistoricalFormatWithoutAnId(): void
+    {
+        Assert::same(preg_match('/^[0-9a-f]{32}$/', WebhookEvent::create(type: 't', payload: '{}')->getId()), 1);
+    }
+
     public function createsWithExplicitOccurredAt(): void
     {
         $at = new DateTimeImmutable('2026-06-01 10:00:00');

@@ -36,13 +36,19 @@ final readonly class WebhookDelivery
         }
     }
 
+    /**
+     * @param ?string $id id of this delivery attempt record; null generates 32
+     *                    random hex characters. Keep it within 32 characters —
+     *                    that is the column width in rasuvaeff/yii3-webhooks-db
+     */
     public static function create(
         WebhookEvent $event,
         WebhookEndpoint $endpoint,
         ?DateTimeImmutable $createdAt = null,
+        ?string $id = null,
     ): self {
         return new self(
-            id: bin2hex(random_bytes(16)),
+            id: $id ?? bin2hex(random_bytes(16)),
             eventId: $event->getId(),
             eventType: $event->getType(),
             endpointUrl: $endpoint->getUrl(),
