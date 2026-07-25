@@ -42,7 +42,7 @@ final readonly class WebhookSignature
             throw new InvalidArgumentException('Signature header must contain t and v1 fields');
         }
 
-        if (!preg_match('/^\d+$/', $parts['t'])) {
+        if (!preg_match('/^\d+\z/', $parts['t'])) {
             throw new InvalidArgumentException('Invalid timestamp in signature header');
         }
 

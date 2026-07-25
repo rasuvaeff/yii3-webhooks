@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.1 — 2026-07-25
+
+- Hygiene: anchor the timestamp digit pattern in
+  `WebhookSignature::fromHeaderValue()` with `\z` instead of `$` (PCRE `$`
+  matches before a trailing `\n`). Not observable through public API — the
+  header parser already `trim()`s each field before the regex runs.
+
 ## 1.2.0 — 2026-07-25
 
 - `WebhookEvent::create()` accepts an optional `id`. The event id travels to
