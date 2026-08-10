@@ -311,6 +311,21 @@ final class WebhookRetryPolicyTest
         ];
     }
 
+    /**
+     * Boundary cases for the delay envelope: zero base, exact cap, multiplier
+     * of 1.0 (fixed), and the maximum generated attempts value.
+     *
+     * @return iterable<array{0: int, 1: int, 2: int, 3: float, 4: int}>
+     */
+    public static function nextDelayStaysWithinZeroAndCapExamples(): iterable
+    {
+        yield 'base=0 → delay is always 0' => [1, 0, 0, 1.0, 1];
+        yield 'base=0 with cap > 0' => [1, 0, 100, 2.0, 5];
+        yield 'multiplier=1.0 → delay == base regardless of attempts' => [5, 60, 0, 1.0, 10];
+        yield 'attempts large enough to hit cap (capped)' => [10, 10, 3_590, 2.0, 30];
+        yield 'attempts=1, base=300, cap=0 → delay==base' => [1, 300, 0, 2.0, 1];
+    }
+
     #[Property(runs: 300)]
     public function exhaustedDeliveryIsNeverRetried(int $maxAttempts, int $extra): void
     {
@@ -327,6 +342,17 @@ final class WebhookRetryPolicyTest
             'maxAttempts' => Gen::intBetween(1, 8),
             'extra' => Gen::intBetween(0, 5),
         ];
+    }
+
+    /**
+     * @return iterable<array{0: int, 1: int}>
+     */
+    public static function exhaustedDeliveryIsNeverRetriedExamples(): iterable
+    {
+        yield 'attempts == maxAttempts (boundary)' => [1, 0];
+        yield 'attempts == maxAttempts + 1 (one over)' => [1, 1];
+        yield 'attempts >> maxAttempts' => [1, 5];
+        yield 'maxAttempts at upper range' => [8, 5];
     }
 
     #[Property(runs: 300)]
@@ -346,5 +372,15 @@ final class WebhookRetryPolicyTest
             'attempts' => Gen::intBetween(0, 8),
             'slack' => Gen::intBetween(1, 5),
         ];
+    }
+
+    /**
+     * @return iterable<array{0: int, 1: int}>
+     */
+    public static function pendingDeliveryBelowMaxIsRetriedExamples(): iterable
+    {
+        yield 'fresh delivery (attempts=0)' => [0, 1];
+        yield 'one below max' => [7, 1];
+        yield 'minimum slack' => [4, 1];
     }
 }

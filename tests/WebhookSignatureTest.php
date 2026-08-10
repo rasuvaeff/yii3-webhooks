@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Rasuvaeff\Yii3Webhooks\Tests;
 
 use InvalidArgumentException;
+use Rasuvaeff\PropertyTesting\ArbitraryInterface;
+use Rasuvaeff\PropertyTesting\Gen;
+use Rasuvaeff\PropertyTesting\Property;
 use Rasuvaeff\Yii3Webhooks\WebhookSignature;
 use Testo\Assert;
 use Testo\Codecov\Covers;
@@ -127,5 +130,69 @@ final class WebhookSignatureTest
         } catch (InvalidArgumentException $e) {
             Assert::string($e->getMessage())->contains('Invalid timestamp in signature header');
         }
+    }
+
+    #[Property(runs: 200)]
+    public function headerRoundTripPreservesTimestampAndValue(int $timestamp, string $value): void
+    {
+        $sig = new WebhookSignature(timestamp: $timestamp, value: $value);
+        $restored = WebhookSignature::fromHeaderValue(header: $sig->toHeaderValue());
+
+        Assert::same($restored->getTimestamp(), $timestamp);
+        Assert::same($restored->getValue(), $value);
+    }
+
+    /** @return array<string, ArbitraryInterface> */
+    public static function headerRoundTripPreservesTimestampAndValueGenerators(): array
+    {
+        return [
+            // positive int — constructor rejects <= 0
+            'timestamp' => Gen::intPositive(),
+            // hex alphabet keeps the value free of `,` and `=`, both of which
+            // would interact with the header's explode-based parser; this
+            // isolates the round-trip property from the parser's known
+            // delimiter handling.
+            'value' => Gen::stringFrom(alphabet: '0123456789abcdef', minLength: 1, maxLength: 128),
+        ];
+    }
+
+    /**
+     * Boundary cases for the round-trip: minimum-positive timestamp, single-char
+     * value, a realistic 64-char HMAC-SHA256 hex digest, and a long value.
+     *
+     * @return iterable<array{0: int, 1: string}>
+     */
+    public static function headerRoundTripPreservesTimestampAndValueExamples(): iterable
+    {
+        yield 'minimum timestamp' => [1, 'a'];
+        yield 'typical HMAC-SHA256 (64 hex chars)' => [
+            1_717_228_800,
+            '4f3a8c2b1e0d5a6f7c9b8e2d1a4f5c6b3e2d1a0f9c8b7e6d5a4f3c2b1e0d9a8',
+        ];
+        yield 'long value (max HMAC + extra)' => [1_717_228_800, str_repeat(string: 'ab', times: 64)];
+    }
+
+    /**
+     * Whitespace around delimiters is allowed by the parser ({@see trim()});
+     * verify the parser still extracts the original values when spaces are
+     * injected around `=` and `,`.
+     */
+    #[Property(runs: 100)]
+    public function headerWithSpacesRoundTripsToSameValues(int $timestamp, string $value): void
+    {
+        $header = "t = {$timestamp} , v1 = {$value}";
+        $sig = WebhookSignature::fromHeaderValue(header: $header);
+
+        Assert::same($sig->getTimestamp(), $timestamp);
+        Assert::same($sig->getValue(), $value);
+    }
+
+    /** @return array<string, ArbitraryInterface> */
+    public static function headerWithSpacesRoundTripsToSameValuesGenerators(): array
+    {
+        return [
+            'timestamp' => Gen::intPositive(),
+            'value' => Gen::stringFrom(alphabet: '0123456789abcdef', minLength: 1, maxLength: 64),
+        ];
     }
 }
