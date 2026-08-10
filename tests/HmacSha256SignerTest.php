@@ -113,10 +113,9 @@ final class HmacSha256SignerTest
     public static function signIsDeterministicAcrossRepeatedCallsGenerators(): array
     {
         return [
-            // payload: include JSON-shaped strings, since that's the realistic input
+            // payload: arbitrary ASCII — the signer treats it as opaque bytes
             'payload' => Gen::stringAscii(),
-            // secret: non-empty ASCII (the signer does not validate, but empty
-            // secrets make the test's "differs" assertion trivially false-positive)
+            // secret: non-empty ASCII; the signer does not validate it
             'secret' => Gen::stringFrom(alphabet: 'abcdefghijklmnopqrstuvwxyz0123456789!@#$', minLength: 1, maxLength: 64),
             // positive int — WebhookSignature rejects <= 0
             'timestamp' => Gen::intPositive(),

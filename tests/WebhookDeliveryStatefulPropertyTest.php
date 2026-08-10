@@ -10,6 +10,7 @@ use Rasuvaeff\PropertyTesting\Gen;
 use Rasuvaeff\PropertyTesting\Property;
 use Rasuvaeff\PropertyTesting\StateMachine\CommandSequence;
 use Rasuvaeff\PropertyTesting\StateMachine\StateMachine;
+use Rasuvaeff\Yii3Webhooks\Tests\Support\DeliveryAction;
 use Rasuvaeff\Yii3Webhooks\Tests\Support\DeliveryCommand;
 use Rasuvaeff\Yii3Webhooks\Tests\Support\DeliveryHarness;
 use Rasuvaeff\Yii3Webhooks\Tests\Support\DeliveryState;
@@ -37,13 +38,13 @@ final class WebhookDeliveryStatefulPropertyTest
     {
         return [
             // Record an attempt with no error (transient network blip cleared on retry)
-            Gen::constant(value: new DeliveryCommand(action: DeliveryCommand::ATTEMPT, error: null)),
+            Gen::constant(value: new DeliveryCommand(action: DeliveryAction::Attempt, error: null)),
             // Record an attempt with a typed error (realistic dispatcher payload)
-            Gen::constant(value: new DeliveryCommand(action: DeliveryCommand::ATTEMPT, error: 'HTTP 503')),
+            Gen::constant(value: new DeliveryCommand(action: DeliveryAction::Attempt, error: 'HTTP 503')),
             // Mark success — terminal
-            Gen::constant(value: new DeliveryCommand(action: DeliveryCommand::SUCCEED)),
+            Gen::constant(value: new DeliveryCommand(action: DeliveryAction::Succeed)),
             // Mark failure — terminal
-            Gen::constant(value: new DeliveryCommand(action: DeliveryCommand::FAIL)),
+            Gen::constant(value: new DeliveryCommand(action: DeliveryAction::Fail)),
         ];
     }
 

@@ -23,12 +23,8 @@ use Rasuvaeff\Yii3Webhooks\WebhookDeliveryStatus;
  */
 final readonly class DeliveryCommand implements Command
 {
-    public const string ATTEMPT = 'attempt';
-    public const string SUCCEED = 'succeed';
-    public const string FAIL = 'fail';
-
     public function __construct(
-        private string $action,
+        private DeliveryAction $action,
         private ?string $error = null,
     ) {}
 
@@ -37,7 +33,7 @@ final readonly class DeliveryCommand implements Command
     {
         // WebhookDelivery's withStatus/withAttempt do not forbid any transition
         // (the package is a state holder, not a state machine — retry policy
-        // lives elsewhere). All three commands apply from every state.
+        // lives elsewhere). All three actions apply from every state.
         return true;
     }
 
@@ -47,17 +43,17 @@ final readonly class DeliveryCommand implements Command
         \assert($model instanceof DeliveryState);
 
         return match ($this->action) {
-            self::ATTEMPT => new DeliveryState(
+            DeliveryAction::Attempt => new DeliveryState(
                 status: $model->status,
                 attempts: $model->attempts + 1,
                 lastError: $this->error,
             ),
-            self::SUCCEED => new DeliveryState(
+            DeliveryAction::Succeed => new DeliveryState(
                 status: WebhookDeliveryStatus::Delivered,
                 attempts: $model->attempts,
                 lastError: $model->lastError,
             ),
-            self::FAIL => new DeliveryState(
+            DeliveryAction::Fail => new DeliveryState(
                 status: WebhookDeliveryStatus::Failed,
                 attempts: $model->attempts,
                 lastError: $model->lastError,
@@ -74,9 +70,9 @@ final readonly class DeliveryCommand implements Command
         $clock = self::frozenClock();
 
         $next = match ($this->action) {
-            self::ATTEMPT => $current->withAttempt(at: $clock, error: $this->error),
-            self::SUCCEED => $current->withStatus(status: WebhookDeliveryStatus::Delivered),
-            self::FAIL => $current->withStatus(status: WebhookDeliveryStatus::Failed),
+            DeliveryAction::Attempt => $current->withAttempt(at: $clock, error: $this->error),
+            DeliveryAction::Succeed => $current->withStatus(status: WebhookDeliveryStatus::Delivered),
+            DeliveryAction::Fail => $current->withStatus(status: WebhookDeliveryStatus::Failed),
         };
 
         return $system->delivery = $next;
@@ -99,9 +95,9 @@ final readonly class DeliveryCommand implements Command
     public function __toString(): string
     {
         return match ($this->action) {
-            self::ATTEMPT => "attempt(error=" . ($this->error ?? 'null') . ')',
-            self::SUCCEED => 'succeed',
-            self::FAIL => 'fail',
+            DeliveryAction::Attempt => "attempt(error=" . ($this->error ?? 'null') . ')',
+            DeliveryAction::Succeed => 'succeed',
+            DeliveryAction::Fail => 'fail',
         };
     }
 
