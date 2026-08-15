@@ -67,7 +67,7 @@ final readonly class DeliveryCommand implements Command
         \assert($system instanceof DeliveryHarness);
 
         $current = $system->delivery;
-        $clock = self::frozenClock();
+        $clock = $this->frozenClock();
 
         $next = match ($this->action) {
             DeliveryAction::Attempt => $current->withAttempt(at: $clock, error: $this->error),
@@ -101,7 +101,7 @@ final readonly class DeliveryCommand implements Command
         };
     }
 
-    private static function frozenClock(): DateTimeImmutable
+    private function frozenClock(): DateTimeImmutable
     {
         return new DateTimeImmutable('2026-01-01 00:00:00');
     }

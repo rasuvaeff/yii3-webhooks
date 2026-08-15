@@ -38,7 +38,7 @@ final class WebhookDeliveryStatefulPropertyTest
     {
         return [
             // Record an attempt with no error (transient network blip cleared on retry)
-            Gen::constant(value: new DeliveryCommand(action: DeliveryAction::Attempt, error: null)),
+            Gen::constant(value: new DeliveryCommand(action: DeliveryAction::Attempt)),
             // Record an attempt with a typed error (realistic dispatcher payload)
             Gen::constant(value: new DeliveryCommand(action: DeliveryAction::Attempt, error: 'HTTP 503')),
             // Mark success — terminal
@@ -107,18 +107,34 @@ final class WebhookDeliveryStatefulPropertyTest
             label: 'failed',
             minPercent: 5.0,
         );
+
+        // Swarming makes a third shape ordinary: a delivery that only ever
+        // records attempts and never reaches a terminal command — the endpoint
+        // that keeps timing out. Drawing all four commands uniformly, thirty
+        // picks all missing both terminal actions is vanishingly rare, so this
+        // was previously reachable only through the empty sequence.
+        Classify::cover(
+            condition: $finalStatus === WebhookDeliveryStatus::Pending && $sequence->commands !== [],
+            label: 'attempts only, never terminal',
+            minPercent: 5.0,
+        );
     }
 
     /** @return array<string, ArbitraryInterface> */
     public static function lifecycleTracksModelAndKeepsIdentityImmutableGenerators(): array
     {
         return [
-            'sequence' => Gen::commands(
+            // Swarmed: each sequence may use only a drawn subset of the four
+            // commands, so a delivery that only ever attempts is an ordinary
+            // case rather than an astronomically unlikely one. minLength stays
+            // at 0, so a subset from which nothing applies yields an empty
+            // sequence rather than GenerationExhausted.
+            'sequence' => Gen::swarm(Gen::commands(
                 new DeliveryState(status: WebhookDeliveryStatus::Pending, attempts: 0, lastError: null),
                 self::commandGenerators(),
                 minLength: 0,
                 maxLength: 30,
-            ),
+            )),
         ];
     }
 }
