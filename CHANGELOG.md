@@ -53,6 +53,9 @@
   typically `PHP_INT_MIN`) made the delay negative — `isReadyForRetry()` then
   built `modify('+-9223372036854775808 seconds')` and took the worker down with
   a `DateMalformedStringException`.
+- Docs: what a retry worker that survives a restart still owes — the payload and
+  the endpoint secret are deliberately not part of a `WebhookDelivery`, and both
+  lookups belong on the batch rather than on each delivery.
 - `examples/dispatcher.php` builds Guzzle with `allow_redirects => false` and
   connect/read timeouts, and `examples/claiming_worker.php` shows the two-worker
   polling loop.

@@ -205,6 +205,13 @@ foreach ($batch as $delivery) {
 
 `leaseSeconds` must outlive the slowest delivery attempt: a lease that expires while its worker is still delivering lets a second worker claim the same delivery. Every claimed delivery must be marked or released, or it waits out the whole lease before anyone sees it again.
 
+A `WebhookDelivery` carries the event's id, type and destination — not its payload, and no way to reach the endpoint's secret. That split is deliberate: payloads are large and secrets should not sit next to a table anyone queries for delivery status. It does mean a worker that survives a restart needs two lookups of its own, and both should be done per batch rather than per delivery:
+
+- **the payloads**, from your own event store, by the list of `getEventId()` values;
+- **the endpoints**, from wherever you keep registrations, by `getEndpointUrl()` — that is where the secret and the extra headers come from.
+
+`examples/delivery_tracking.php` retries objects still alive in memory, which a real worker cannot rely on; `examples/claiming_worker.php` shows the batch shape.
+
 ## API reference
 
 ### WebhookEvent
