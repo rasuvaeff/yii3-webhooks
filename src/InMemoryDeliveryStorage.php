@@ -49,7 +49,7 @@ final class InMemoryDeliveryStorage implements ClaimingDeliveryStorage, Iterator
             static fn(WebhookDelivery $d): bool => $d->getStatus() === WebhookDeliveryStatus::Pending,
         );
 
-        usort($pending, self::compareQueueOrder(...));
+        usort($pending, $this->compareQueueOrder(...));
 
         return array_slice($pending, 0, $limit);
     }
@@ -68,10 +68,10 @@ final class InMemoryDeliveryStorage implements ClaimingDeliveryStorage, Iterator
             $this->deliveries,
             fn(WebhookDelivery $d): bool => $d->getStatus() === WebhookDeliveryStatus::Pending
                 && $this->isLeaseFree(id: $d->getId(), leaseExpiry: $leaseExpiry)
-                && self::isReady(delivery: $d, readyThresholds: $readyThresholds, maxAttempts: $maxAttempts),
+                && $this->isReady(delivery: $d, readyThresholds: $readyThresholds, maxAttempts: $maxAttempts),
         );
 
-        usort($claimable, self::compareQueueOrder(...));
+        usort($claimable, $this->compareQueueOrder(...));
 
         $claimed = array_slice($claimable, 0, $limit);
 
@@ -169,7 +169,7 @@ final class InMemoryDeliveryStorage implements ClaimingDeliveryStorage, Iterator
      *
      * @param array<int, DateTimeImmutable> $readyThresholds ascending by key
      */
-    private static function isReady(WebhookDelivery $delivery, array $readyThresholds, int $maxAttempts): bool
+    private function isReady(WebhookDelivery $delivery, array $readyThresholds, int $maxAttempts): bool
     {
         $attempts = $delivery->getAttempts();
 
@@ -196,7 +196,7 @@ final class InMemoryDeliveryStorage implements ClaimingDeliveryStorage, Iterator
         return !$applicable instanceof DateTimeImmutable || $lastAttemptAt <= $applicable;
     }
 
-    private static function compareQueueOrder(WebhookDelivery $a, WebhookDelivery $b): int
+    private function compareQueueOrder(WebhookDelivery $a, WebhookDelivery $b): int
     {
         $cmp = $a->getCreatedAt() <=> $b->getCreatedAt();
 

@@ -9,6 +9,7 @@ use Rasuvaeff\PropertyTesting\ArbitraryInterface;
 use Rasuvaeff\PropertyTesting\Classify;
 use Rasuvaeff\PropertyTesting\Gen;
 use Rasuvaeff\PropertyTesting\Property;
+use Rasuvaeff\Yii3Webhooks\Tests\Support\HostGenerators;
 use Rasuvaeff\Yii3Webhooks\WebhookEndpoint;
 use Testo\Assert;
 use Testo\Codecov\Covers;
@@ -301,10 +302,10 @@ final class WebhookEndpointTest
      * branches are gated, so a regression that turns the check into a constant
      * fails here instead of silently passing half the suite.
      */
-    #[Property(runs: 300, timeoutMs: 250)]
+    #[Property(runs: 300, generators: [HostGenerators::class, 'verdictFlag'], timeoutMs: 250)]
     public function privateHostsRejectedPublicHostsAccepted(bool $private): void
     {
-        $host = Gen::draw($private ? self::privateHostGenerator() : self::publicHostGenerator());
+        $host = Gen::draw($private ? HostGenerators::privateHost() : HostGenerators::publicHost());
         \assert(\is_string($host));
 
         $rejected = false;
@@ -321,53 +322,10 @@ final class WebhookEndpointTest
         Classify::cover(condition: !$private, label: 'public host accepted', minPercent: 30.0);
     }
 
-    /** @return array<string, ArbitraryInterface> */
-    public static function privateHostsRejectedPublicHostsAcceptedGenerators(): array
-    {
-        return ['private' => Gen::bool()];
-    }
-
     /** @return iterable<string, array{bool}> */
     public static function privateHostsRejectedPublicHostsAcceptedExamples(): iterable
     {
         yield 'a private host' => [true];
         yield 'a public host' => [false];
-    }
-
-    private static function privateHostGenerator(): ArbitraryInterface
-    {
-        return Gen::frequency([
-            // octets without a leading zero: "10.01.0.0" is not an IPv4
-            // literal at all, it is a host name, and rightly not blocked
-            [3, Gen::regex('127\.(0|[1-9]\d?)\.(0|[1-9]\d?)\.(0|[1-9]\d?)')],
-            [3, Gen::regex('10\.(0|[1-9]\d?)\.(0|[1-9]\d?)\.(0|[1-9]\d?)')],
-            [2, Gen::regex('192\.168\.(0|[1-9]\d?)\.(0|[1-9]\d?)')],
-            [2, Gen::regex('169\.254\.(0|[1-9]\d?)\.(0|[1-9]\d?)')],
-            [1, Gen::regex('\[fe80::\d{1,3}\]')],
-            // `localhost.` and friends carry the DNS root label — the same
-            // names, so the same verdict
-            [2, Gen::elements([
-                'localhost',
-                'api.localhost',
-                '[::1]',
-                '0.0.0.0',
-                'localhost.',
-                'api.localhost.',
-                '127.0.0.1.',
-            ])],
-        ]);
-    }
-
-    private static function publicHostGenerator(): ArbitraryInterface
-    {
-        return Gen::frequency([
-            // 8/8 and 9/8 are ordinary public space
-            [2, Gen::regex('[89]\.(0|[1-9]\d?)\.(0|[1-9]\d?)\.(0|[1-9]\d?)')],
-            [3, Gen::regex('[a-z]{2,8}\.example\.(com|net|org)')],
-            [3, Gen::regex('[a-z]{2,8}\.[a-z]{2,6}')],
-            // the root label must not turn an ordinary endpoint into a rejected
-            // one either — stripping it is a normalisation, not a filter
-            [2, Gen::regex('[a-z]{2,8}\.[a-z]{2,6}\.')],
-        ]);
     }
 }

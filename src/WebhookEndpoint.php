@@ -69,17 +69,17 @@ final readonly class WebhookEndpoint
             throw new InvalidArgumentException('Endpoint URL must not contain credentials');
         }
 
-        $host = self::withoutRootLabel($parts['host'] ?? '');
+        $host = $this->withoutRootLabel($parts['host'] ?? '');
 
         if ($host === '') {
             throw new InvalidArgumentException('Endpoint URL must contain a host');
         }
 
-        if (!self::isValidHost($host)) {
+        if (!$this->isValidHost($host)) {
             throw new InvalidArgumentException('Endpoint URL host is not a host name or IP literal');
         }
 
-        if (!$allowPrivateNetwork && self::isPrivateHost($host)) {
+        if (!$allowPrivateNetwork && $this->isPrivateHost($host)) {
             throw new InvalidArgumentException(
                 'Endpoint URL must not point at a loopback, private or link-local address',
             );
@@ -130,7 +130,7 @@ final readonly class WebhookEndpoint
      * (`localhost..`) is not a name any resolver accepts, so nothing is gained
      * by canonicalising it into one that is.
      */
-    private static function withoutRootLabel(string $host): string
+    private function withoutRootLabel(string $host): string
     {
         return str_ends_with($host, '.') ? substr($host, 0, -1) : $host;
     }
@@ -140,9 +140,9 @@ final readonly class WebhookEndpoint
      * host with a space or a control character in it reaches this far. Nothing
      * can deliver to one, and a client that tries is a request-smuggling risk.
      */
-    private static function isValidHost(string $host): bool
+    private function isValidHost(string $host): bool
     {
-        $literal = self::ipv6Literal($host);
+        $literal = $this->ipv6Literal($host);
 
         if ($literal !== null) {
             return filter_var($literal, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false;
@@ -159,14 +159,14 @@ final readonly class WebhookEndpoint
      * of this monorepo is: the dollar form also matches before a trailing
      * newline, and the caret form stops anchoring the moment anyone adds `/m`.
      */
-    private static function ipv6Literal(string $host): ?string
+    private function ipv6Literal(string $host): ?string
     {
         return preg_match('/\A\[(?<address>.+)]\z/', $host, $matches) === 1
             ? $matches['address']
             : null;
     }
 
-    private static function isPrivateHost(string $host): bool
+    private function isPrivateHost(string $host): bool
     {
         $name = strtolower($host);
 
@@ -175,7 +175,7 @@ final readonly class WebhookEndpoint
         }
 
         // an IPv6 literal reaches us bracketed, as it appears in the URL
-        $ip = self::ipv6Literal($host) ?? $host;
+        $ip = $this->ipv6Literal($host) ?? $host;
         $packed = inet_pton($ip);
 
         if ($packed === false) {
@@ -184,13 +184,13 @@ final readonly class WebhookEndpoint
             return false;
         }
 
-        if (self::isBlockedAddress($ip)) {
+        if ($this->isBlockedAddress($ip)) {
             return true;
         }
 
-        $embedded = self::embeddedIpv4($packed);
+        $embedded = $this->embeddedIpv4($packed);
 
-        return $embedded !== null && self::isBlockedAddress($embedded);
+        return $embedded !== null && $this->isBlockedAddress($embedded);
     }
 
     /**
@@ -198,7 +198,7 @@ final readonly class WebhookEndpoint
      * NO_RES_RANGE covers 0/8, 127/8, 169.254/16 (cloud metadata), 240/4, `::`,
      * `::1`, `::ffff:0:0/96` and fe80::/10.
      */
-    private static function isBlockedAddress(string $ip): bool
+    private function isBlockedAddress(string $ip): bool
     {
         return filter_var(
             $ip,
@@ -219,7 +219,7 @@ final readonly class WebhookEndpoint
      *
      * @param string $packed the address in its `inet_pton()` binary form
      */
-    private static function embeddedIpv4(string $packed): ?string
+    private function embeddedIpv4(string $packed): ?string
     {
         // a packed IPv4 is four bytes, so its prefix can never be twelve long
         // and falls through the check below
