@@ -13,12 +13,14 @@ Public API:
 - `WebhookEndpoint` — target URL + secret + optional headers
 - `WebhookSignature` — HMAC signature (timestamp + value) with header serialization
 - `WebhookSigner` — signing interface
-- `HmacSha256Signer` — HMAC-SHA256 implementation; signs `"{t}.{payload}"` with secret
+- `HmacSha256Signer` — HMAC-SHA256 implementation; signs the length-prefixed
+  canonical message (see Invariants)
 - `WebhookVerifier` — inbound verification: timestamp tolerance + HMAC comparison
 - `WebhookDelivery` — delivery attempt record (no secret stored — safe to log)
 - `WebhookDeliveryStatus` — enum: `Pending`, `Delivered`, `Failed`
 - `WebhookDeliveryStorage` — storage interface
-- `InMemoryDeliveryStorage` — test implementation
+- `ClaimingDeliveryStorage` — optional storage interface: lease-based claiming
+- `InMemoryDeliveryStorage` — test implementation (implements both)
 - `WebhookRetryPolicy` — retry logic (maxAttempts, delaySeconds)
 - `WebhookDispatcher` — dispatcher interface
 - `NonceStorage` — nonce storage interface
@@ -78,9 +80,27 @@ make release-check
   `yii3-webhooks-db`. Nothing derives meaning from the id's shape (the storage
   uses it only as an equality condition), so `create(id: ...)` is pure
   convenience, but the ceiling is real.
-- Canonical message for signing: `"{eventId}.{timestamp}.{payload}"` where
-  `eventId` is sent as `X-Webhook-Id` header, and `payload` is the exact raw
-  body string. Do not re-encode JSON before verification.
+- Canonical message for signing:
+  `"{strlen(eventId)}.{eventId}.{timestamp}.{strlen(payload)}.{payload}"`, where
+  `eventId` is sent as the `X-Webhook-Id` header and `payload` is the exact raw
+  body string. Do not re-encode JSON before verification. **The length prefixes
+  are load-bearing**: `.` is legal inside an event id, so without them one signed
+  string parses into several (eventId, timestamp, payload) triples and an
+  intercepted delivery can be re-framed around the same signature with a payload
+  of the attacker's choosing (and a different replay-guard nonce). Any change to
+  the canonical message breaks every deployed receiver — treat it as such.
+- **Storage contract.** `save()` must never write the status of a delivery that
+  already exists (a stale copy would resurrect a finished delivery); status
+  belongs to `markDelivered()`/`markFailed()`/the claim. With more than one
+  worker the storage must implement `ClaimingDeliveryStorage`: ownership is a
+  lease (the delivery stays `Pending` and becomes claimable again when the lease
+  expires), and `claimReady()` must also hand out deliveries with
+  `attempts >= maxAttempts` — nothing else can terminate them.
+- **`WebhookEndpoint` treats the URL as attacker-controlled**: http/https only,
+  a host that is a host name or IP literal, no credentials, and no loopback /
+  private / link-local / reserved IP literal unless `allowPrivateNetwork: true`.
+  It deliberately does not resolve host names — resolving guards, redirect
+  policy and timeouts belong to the dispatcher (README Security section).
 - Signature header format: `t={timestamp},v1={hmac_hex}`.
 - Signature comparison MUST use `hash_equals()` — never `===`.
 - `WebhookVerifier` returns `bool` — it does NOT throw on invalid signatures.

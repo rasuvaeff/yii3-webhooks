@@ -18,9 +18,12 @@ retry policy for webhooks. No HTTP client dependency — you implement
 ## Safety rules — verify these on every change
 
 1. **Never hand-roll signing or comparison.** The canonical signed message is
-   `"{eventId}.{timestamp}.{payload}"` where `payload` is the exact raw HTTP
-   body string — do not re-encode JSON before verifying. Comparison must be
-   constant-time; the package uses `hash_equals()` internally.
+   `"{strlen(eventId)}.{eventId}.{timestamp}.{strlen(payload)}.{payload}"` where
+   `payload` is the exact raw HTTP body string — do not re-encode JSON before
+   verifying. The length prefixes keep the message canonical: `.` is legal
+   inside an event id, and a scheme without them lets an intercepted delivery be
+   re-framed around the same signature. Comparison must be constant-time; the
+   package uses `hash_equals()` internally.
 
    ```php
    $verifier->verify(payload: $rawBody, secret: $secret, signature: $sig, eventId: $id); // correct
@@ -36,20 +39,34 @@ retry policy for webhooks. No HTTP client dependency — you implement
 3. **Secrets never go in URLs or logs.** Transport the signature via the
    `X-Webhook-Signature: t={ts},v1={hex}` header and the secret via
    config/DI. `WebhookDelivery` deliberately stores only `endpointUrl` —
-   never add the secret to it; it is safe to log as-is.
+   never add the secret to it; it is safe to log as-is. `WebhookEndpoint`
+   rejects credentials in the URL for the same reason.
 
-4. **`WebhookVerifier::verify()` returns `bool` — it does not throw.**
+4. **The endpoint URL is attacker-controlled input.** `WebhookEndpoint` blocks
+   loopback/private/link-local/reserved IP literals (`allowPrivateNetwork: true`
+   opts back in) but does not resolve host names: your dispatcher must
+   resolve-and-filter, refuse redirects (or re-check every hop) and set
+   timeouts. Guzzle's defaults do neither.
+
+5. **More than one delivery worker => claim, do not poll.** `findPending()`
+   hands the same deliveries to every worker and ignores backoff. Use
+   `$storage instanceof ClaimingDeliveryStorage` and `claimReady()`, then mark
+   or `releaseClaim()` everything it returned. `save()` never changes the status
+   of a delivery that already exists — that is what stops a stale copy from
+   resurrecting a finished one.
+
+6. **`WebhookVerifier::verify()` returns `bool` — it does not throw.**
    Reject the request yourself on `false`. Timestamp tolerance
    (`toleranceSeconds`, default in examples 300) bounds the replay window.
 
-5. **Pass the domain event's id to `WebhookEvent::create(id: ...)`.** That id
+7. **Pass the domain event's id to `WebhookEvent::create(id: ...)`.** That id
    leaves in `X-Webhook-Id` and is the receiver's deduplication key — if the
    package generates one, a republish of the same domain event arrives under a
    new id and the receiver cannot tell it is a duplicate. Omitted, the id is 32
    random hex characters. `WebhookDelivery::create(id: ...)` exists too; keep
    it within 32 characters, the column width in `yii3-webhooks-db`.
 
-6. **Finalize exhausted deliveries.** When `WebhookRetryPolicy::shouldRetry()`
+8. **Finalize exhausted deliveries.** When `WebhookRetryPolicy::shouldRetry()`
    is `false`, call `$storage->markFailed($delivery)` — otherwise the delivery
    stays `Pending` forever.
 

@@ -174,6 +174,17 @@ final class WebhookRetryPolicyTest
         Assert::true($policy->isReadyForRetry($delivery, new DateTimeImmutable()));
     }
 
+    /**
+     * A terminal delivery is never ready, even with no attempt recorded — the
+     * `shouldRetry()` gate runs before the "never attempted" shortcut.
+     */
+    public function isNotReadyForRetryWhenAlreadyDelivered(): void
+    {
+        $delivery = $this->delivery(attempts: 0)->withStatus(WebhookDeliveryStatus::Delivered);
+
+        Assert::false($this->fixture->isReadyForRetry($delivery, new DateTimeImmutable()));
+    }
+
     public function isNotReadyForRetryWhenMaxAttemptsExhausted(): void
     {
         $delivery = $this->delivery(attempts: 3);
@@ -324,6 +335,115 @@ final class WebhookRetryPolicyTest
         yield 'multiplier=1.0 → delay == base regardless of attempts' => [5, 60, 0, 1.0, 10];
         yield 'attempts large enough to hit cap (capped)' => [10, 10, 3_590, 2.0, 30];
         yield 'attempts=1, base=300, cap=0 → delay==base' => [1, 300, 0, 2.0, 1];
+        // the float passes PHP_INT_MAX long before this attempt count; casting
+        // it before applying the cap used to yield PHP_INT_MIN
+        yield 'exponential overflows PHP_INT_MAX before the cap applies' => [100, 3_600, 0, 2.0, 80];
+    }
+
+    // ── overflow ─────────────────────────────────────────────────────────────
+
+    public function nextDelayIsCappedWhenTheExponentialOverflows(): void
+    {
+        $policy = WebhookRetryPolicy::exponential(maxAttempts: 100, baseSeconds: 3_600, cap: 7_200);
+
+        Assert::same($policy->nextDelaySeconds(80), 7_200);
+    }
+
+    /**
+     * With the cap applied after the int cast, the delay came out negative and
+     * `isReadyForRetry()` built `modify('+-9223372036854775808 seconds')` — a
+     * DateMalformedStringException that takes the worker down.
+     */
+    public function isReadyForRetryStaysWithinTheCapWhenTheExponentialOverflows(): void
+    {
+        $policy = WebhookRetryPolicy::exponential(maxAttempts: 100, baseSeconds: 3_600, cap: 7_200);
+        $delivery = $this->delivery(attempts: 80, lastAttemptAt: new DateTimeImmutable('2026-01-01 00:00:00'));
+
+        Assert::false($policy->isReadyForRetry($delivery, new DateTimeImmutable('2026-01-01 01:00:00')));
+        Assert::true($policy->isReadyForRetry($delivery, new DateTimeImmutable('2026-01-01 03:00:00')));
+    }
+
+    // ── readyThresholds() ────────────────────────────────────────────────────
+
+    public function readyThresholdsMapAttemptCountsToBoundaries(): void
+    {
+        $policy = WebhookRetryPolicy::exponential(maxAttempts: 4, baseSeconds: 60, cap: 600);
+
+        $thresholds = $policy->readyThresholds(new DateTimeImmutable('2026-08-22 12:00:00'));
+
+        Assert::same(array_keys($thresholds), [1, 2, 3]);
+        Assert::same($thresholds[1]->format('Y-m-d H:i:s'), '2026-08-22 11:59:00');
+        Assert::same($thresholds[2]->format('Y-m-d H:i:s'), '2026-08-22 11:58:00');
+        Assert::same($thresholds[3]->format('Y-m-d H:i:s'), '2026-08-22 11:56:00');
+    }
+
+    public function readyThresholdsStopWhereTheDelayStopsGrowing(): void
+    {
+        $thresholds = WebhookRetryPolicy::fixed(maxAttempts: 5, delaySeconds: 60)
+            ->readyThresholds(new DateTimeImmutable('2026-08-22 12:00:00'));
+
+        // one entry, and it applies to every larger attempt count
+        Assert::same(array_keys($thresholds), [1]);
+        Assert::same($thresholds[1]->format('Y-m-d H:i:s'), '2026-08-22 11:59:00');
+    }
+
+    public function readyThresholdsStopAtTheCap(): void
+    {
+        $policy = WebhookRetryPolicy::exponential(maxAttempts: 10, baseSeconds: 60, cap: 120);
+
+        // delays are 60, 120, 120, ... — the map ends at the first capped one
+        Assert::same(array_keys($policy->readyThresholds(new DateTimeImmutable('2026-08-22 12:00:00'))), [1, 2]);
+    }
+
+    public function readyThresholdsAreEmptyForASingleAttemptPolicy(): void
+    {
+        $policy = WebhookRetryPolicy::fixed(maxAttempts: 1, delaySeconds: 60);
+
+        Assert::same($policy->readyThresholds(new DateTimeImmutable('2026-08-22 12:00:00')), []);
+    }
+
+    /**
+     * The thresholds are the same inequality as `isReadyForRetry()`, rearranged
+     * so a backend can push it down: a delivery whose last attempt is at or
+     * before its threshold is exactly one the per-delivery check accepts.
+     */
+    #[Property(runs: 300)]
+    public function readyThresholdsAgreeWithIsReadyForRetry(int $attempts, int $agoSeconds): void
+    {
+        $policy = WebhookRetryPolicy::exponential(maxAttempts: 5, baseSeconds: 30, cap: 240);
+        $now = new DateTimeImmutable('2026-08-22 12:00:00');
+        $lastAttemptAt = $now->modify('-' . $agoSeconds . ' seconds');
+        $delivery = $this->delivery(attempts: $attempts, lastAttemptAt: $lastAttemptAt);
+
+        $thresholds = $policy->readyThresholds($now);
+        $threshold = $thresholds[min($attempts, array_key_last($thresholds) ?? $attempts)] ?? null;
+
+        $pushedDown = $attempts >= $policy->getMaxAttempts()
+            || !$threshold instanceof DateTimeImmutable
+            || $lastAttemptAt <= $threshold;
+
+        Assert::same(
+            $pushedDown,
+            $policy->isReadyForRetry($delivery, $now) || $attempts >= $policy->getMaxAttempts(),
+        );
+    }
+
+    /** @return array<string, ArbitraryInterface> */
+    public static function readyThresholdsAgreeWithIsReadyForRetryGenerators(): array
+    {
+        return [
+            'attempts' => Gen::intBetween(1, 8),
+            'agoSeconds' => Gen::intBetween(0, 600),
+        ];
+    }
+
+    /** @return iterable<array{0: int, 1: int}> */
+    public static function readyThresholdsAgreeWithIsReadyForRetryExamples(): iterable
+    {
+        yield 'first retry, exactly at the boundary' => [1, 30];
+        yield 'first retry, one second early' => [1, 29];
+        yield 'attempt count past the last threshold key' => [4, 240];
+        yield 'exhausted' => [5, 0];
     }
 
     #[Property(runs: 300)]

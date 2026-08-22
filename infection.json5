@@ -19,6 +19,12 @@
         },
         "ConcatOperandRemoval": {
             "ignore": ["Rasuvaeff\\Yii3Webhooks\\WebhookRetryPolicy"]
+        },
+        // psalm's strict binary operands require the cast; dropping it changes
+        // nothing at runtime (int * float is float either way), so the mutant
+        // is equivalent and the cast is not optional
+        "CastFloat": {
+            "ignore": ["Rasuvaeff\\Yii3Webhooks\\WebhookRetryPolicy::nextDelaySeconds"]
         }
     }
 }

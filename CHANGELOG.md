@@ -1,5 +1,55 @@
 # Changelog
 
+## Unreleased
+
+- **Breaking (signatures on the wire).** The canonical message signed by
+  `HmacSha256Signer` is now length-prefixed:
+  `"{strlen(eventId)}.{eventId}.{timestamp}.{strlen(payload)}.{payload}"`.
+  `.` is legal inside an event id, so the previous
+  `"{eventId}.{timestamp}.{payload}"` parsed into several different
+  (eventId, timestamp, payload) triples: an event id such as
+  `order.1755600000` produced exactly the bytes an attacker could re-frame as
+  event id `order`, a timestamp of `1755600000` and a payload of their
+  choosing — same signature, different message, and a different nonce, so the
+  replay guard was bypassed too. Signature bytes therefore change: receivers
+  running the previous version reject the new signatures until they upgrade.
+  Roll out the receiving side first, or accept a delivery gap.
+- **Breaking (endpoint validation).** `WebhookEndpoint` now rejects URLs it
+  used to accept: anything that is not http/https with a real host, URLs
+  carrying credentials (`https://user:pass@host/`), and hosts that are
+  loopback, private, link-local or otherwise reserved IP literals —
+  `127.0.0.1`, `10.0.0.5`, `169.254.169.254` (cloud metadata), `[::1]`,
+  `localhost`. Deliveries that are meant to stay inside the perimeter opt back
+  in with `allowPrivateNetwork: true`. Host names are deliberately not
+  resolved; the README's Security section spells out what the dispatcher still
+  owes (resolve-and-filter, redirect policy, timeouts).
+- `ClaimingDeliveryStorage`: an optional interface extending
+  `WebhookDeliveryStorage` for backends that can hand a delivery to exactly one
+  worker. `claimReady()` leases the deliveries that are ready for another
+  attempt — skipping the ones still waiting out their backoff, so a backlog of
+  backing-off deliveries no longer starves the ready ones behind it — and
+  `releaseClaim()` gives a lease back early. Ownership is a lease, not a
+  status: a claimed delivery stays `Pending` and a worker that dies strands
+  nothing. Workers select the path with `instanceof`; existing storages keep
+  working unchanged.
+- `WebhookRetryPolicy::readyThresholds()`: the backoff rule as data a storage
+  backend can push into its own query — attempt count => the latest
+  `lastAttemptAt` that is ready now.
+- `WebhookDeliveryStorage::save()` no longer writes the status of a delivery
+  that already exists, in the contract and in `InMemoryDeliveryStorage`. A
+  worker that lost the race and still held a stale `Pending` copy could
+  otherwise put a finished delivery back into the queue and deliver the same
+  webhook again. Status belongs to `markDelivered()`/`markFailed()`/the claim.
+- `WebhookRetryPolicy::nextDelaySeconds()` applies the cap before the int cast.
+  An exponential policy with a large `maxAttempts` overflowed `PHP_INT_MAX`
+  within a few dozen attempts, and the out-of-range cast (platform-defined,
+  typically `PHP_INT_MIN`) made the delay negative — `isReadyForRetry()` then
+  built `modify('+-9223372036854775808 seconds')` and took the worker down with
+  a `DateMalformedStringException`.
+- `examples/dispatcher.php` builds Guzzle with `allow_redirects => false` and
+  connect/read timeouts, and `examples/claiming_worker.php` shows the two-worker
+  polling loop.
+
 ## 1.2.1 — 2026-07-25
 
 - Hygiene: anchor the timestamp digit pattern in

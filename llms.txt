@@ -16,11 +16,25 @@ composer require rasuvaeff/yii3-webhooks
   chars, the column width in yii3-webhooks-db.
 
 - Sign outbound: `HmacSha256Signer::sign(payload, secret, timestamp, eventId)` → `WebhookSignature`.
-- Canonical message: `"{eventId}.{timestamp}.{payload}"`, where `payload` is the exact HTTP body string.
+- Canonical message: `"{len(eventId)}.{eventId}.{timestamp}.{len(payload)}.{payload}"`,
+  where `payload` is the exact HTTP body string. The length prefixes are what
+  keeps it canonical — `.` is legal inside an event id, and without them one
+  signed string parses into several different triples (an intercepted delivery
+  could be re-framed around the same signature).
 - Send `X-Webhook-Id: {eventId}` and `X-Webhook-Signature: t={ts},v1={hex}` headers.
 - Verify inbound: `WebhookVerifier::verify(payload, secret, signature, eventId)` returns bool.
 - Use `hash_equals()` internally — never `===` for signatures.
 - `WebhookDelivery` stores only `endpointUrl`, never the secret.
+- `WebhookEndpoint` rejects credentials in the URL and loopback/private/link-local/
+  reserved IP literals (`127.0.0.1`, `10.0.0.5`, `169.254.169.254`, `[::1]`,
+  `localhost`); `allowPrivateNetwork: true` opts one endpoint back in. It does not
+  resolve host names — the dispatcher must resolve-and-filter, refuse redirects
+  (or re-check each hop) and set timeouts.
+- `save()` never writes the status of a delivery that already exists — status
+  belongs to `markDelivered()`/`markFailed()`/the claim. Otherwise a stale copy
+  resurrects a finished delivery.
+- More than one worker => the storage must implement `ClaimingDeliveryStorage`;
+  `findPending()` hands the same rows to everyone and ignores backoff.
 - `NonceStorage::add()` must be atomic and return false on duplicate nonce.
 - `ReplayGuard::accept()` throws `RuntimeException` when storage rejects a duplicate nonce.
 - Use event ID (from `X-Webhook-Id` header) as the nonce for replay protection.
@@ -107,6 +121,37 @@ $policy->nextDelaySeconds($delivery->getAttempts()); // seconds until next attem
 ```
 
 `WebhookDeliveryStorage` is the persistence interface. Core provides `InMemoryDeliveryStorage`; production code should use a persistent backend.
+
+### Claiming deliveries (more than one worker)
+
+```php
+use Rasuvaeff\Yii3Webhooks\ClaimingDeliveryStorage;
+
+// ClaimingDeliveryStorage extends WebhookDeliveryStorage; InMemoryDeliveryStorage
+// and rasuvaeff/yii3-webhooks-db implement it.
+$batch = $storage instanceof ClaimingDeliveryStorage
+    ? $storage->claimReady(
+        now: $now,
+        readyThresholds: $policy->readyThresholds($now), // attempts => latest ready lastAttemptAt
+        maxAttempts: $policy->getMaxAttempts(),
+        leaseSeconds: 300,   // must outlive the slowest attempt
+        limit: 100,
+    )
+    : $storage->findPending();
+
+foreach ($batch as $delivery) {
+    // deliver, then leave the claim:
+    //   $storage->markDelivered($delivery->withAttempt($now));
+    //   $storage->markFailed($delivery->withAttempt($now, error: $e));
+    // retryable failure — record the attempt and hand the lease back:
+    //   $storage->save($delivery->withAttempt($now, error: $e));
+    //   $storage->releaseClaim($delivery);
+}
+```
+
+A claimed delivery stays `Pending`; ownership is a lease that expires, so a dead
+worker strands nothing. Exhausted deliveries (`attempts >= maxAttempts`) are
+claimed too — only the caller can mark them `Failed`.
 
 ### WebhookDispatcher (implement your own)
 

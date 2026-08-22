@@ -174,6 +174,37 @@ if ($policy->isReadyForRetry($delivery, $clock->now())) {
 }
 ```
 
+### Delivering with more than one worker
+
+`findPending()` hands the same deliveries to every worker that asks, and it knows nothing about backoff — so two workers deliver the same event twice, and a backlog of deliveries waiting out their backoff fills every batch while ready ones behind them starve. A storage implementing `ClaimingDeliveryStorage` solves both:
+
+```php
+use Rasuvaeff\Yii3Webhooks\ClaimingDeliveryStorage;
+
+$now = $clock->now();
+
+$batch = $storage instanceof ClaimingDeliveryStorage
+    ? $storage->claimReady(
+        now: $now,
+        readyThresholds: $policy->readyThresholds($now),
+        maxAttempts: $policy->getMaxAttempts(),
+        leaseSeconds: 300,
+        limit: 100,
+    )
+    : $storage->findPending();
+
+foreach ($batch as $delivery) {
+    // ... deliver, then move it out of the claim:
+    // $storage->markDelivered($delivery->withAttempt($now));
+    // $storage->markFailed($delivery->withAttempt($now, error: $error));
+    // or, for a retryable failure:
+    //   $storage->save($delivery->withAttempt($now, error: $error));
+    //   $storage->releaseClaim($delivery);
+}
+```
+
+`leaseSeconds` must outlive the slowest delivery attempt: a lease that expires while its worker is still delivering lets a second worker claim the same delivery. Every claimed delivery must be marked or released, or it waits out the whole lease before anyone sees it again.
+
 ## API reference
 
 ### WebhookEvent
@@ -190,10 +221,13 @@ if ($policy->isReadyForRetry($delivery, $clock->now())) {
 
 | Method | Description |
 |---|---|
-| `__construct(url, secret, headers?)` | URL must use http/https; secret non-empty |
+| `__construct(url, secret, headers?, allowPrivateNetwork?)` | http/https scheme, a host, no credentials in the URL, non-empty secret |
 | `getUrl()` | Endpoint URL |
 | `getSecret()` | Shared secret (not stored in delivery) |
 | `getHeaders()` | Additional request headers |
+| `allowsPrivateNetwork()` | Whether this endpoint may point inside the perimeter |
+
+A URL whose host is a loopback, private, link-local or otherwise reserved IP literal (`127.0.0.1`, `10.0.0.5`, `169.254.169.254`, `[::1]`, `localhost`) is rejected — see [Security](#security). Pass `allowPrivateNetwork: true` for endpoints that are meant to stay inside the perimeter. Credentials in the URL (`https://user:pass@host/`) are rejected outright: they are a secret, and the delivery record stores the URL verbatim. Use `headers` for authentication.
 
 ### WebhookSignature
 
@@ -215,7 +249,9 @@ Interface for outbound signature implementations. Custom signers must sign the e
 
 ### HmacSha256Signer
 
-Signs `"{eventId}.{timestamp}.{payload}"` with the secret using HMAC-SHA256. `payload` is the exact HTTP body string, not a re-encoded JSON value.
+Signs `"{len(eventId)}.{eventId}.{timestamp}.{len(payload)}.{payload}"` with the secret using HMAC-SHA256. `payload` is the exact HTTP body string, not a re-encoded JSON value.
+
+The length prefixes are what makes the message canonical: `.` is legal inside an event id, so without them one signed string parses into several different (eventId, timestamp, payload) triples and an intercepted delivery can be re-framed around the same signature.
 
 | Method | Description |
 |---|---|
@@ -238,6 +274,7 @@ Signs `"{eventId}.{timestamp}.{payload}"` with the secret using HMAC-SHA256. `pa
 | `nextDelaySeconds(attempts)` | Delay before next attempt; `attempts` = current attempt count |
 | `shouldRetry(delivery)` | Returns `true` when status is Pending and attempts < maxAttempts |
 | `isReadyForRetry(delivery, now)` | Returns `true` when delay has elapsed |
+| `readyThresholds(now)` | The same rule as data a storage can query: attempt count => the latest `lastAttemptAt` that is ready now |
 
 ### WebhookDelivery
 
@@ -262,11 +299,24 @@ Interface for persistence backends. Core ships `InMemoryDeliveryStorage` for tes
 
 | Method | Description |
 |---|---|
-| `save(delivery)` | Stores a delivery attempt record |
-| `findPending(limit)` | Returns pending deliveries |
-| `markDelivered(delivery)` | Marks a delivery as delivered |
-| `markFailed(delivery)` | Marks a delivery as failed |
+| `save(delivery)` | Stores a new delivery, or updates the attempt state of one already stored — never its status |
+| `findPending(limit)` | Returns pending deliveries, ready or not, claimed or not |
+| `markDelivered(delivery)` | Marks a delivery as delivered, if it is still pending |
+| `markFailed(delivery)` | Marks a delivery as failed, if it is still pending |
 | `getById(id)` | Loads a delivery by ID |
+
+The status of a delivery that already exists is deliberately not written by `save()`: a worker holding a stale copy would otherwise put a finished delivery back into `Pending` and deliver the same webhook again.
+
+### ClaimingDeliveryStorage
+
+Optional interface, extending `WebhookDeliveryStorage`, for backends that can hand a delivery to exactly one worker. `rasuvaeff/yii3-webhooks-db` implements it; `InMemoryDeliveryStorage` does too.
+
+| Method | Description |
+|---|---|
+| `claimReady(now, readyThresholds, maxAttempts, leaseSeconds?, limit?)` | Leases the deliveries that are ready for another attempt, skipping the ones still backing off |
+| `releaseClaim(delivery)` | Gives a lease back early; `true` when one was cleared |
+
+Ownership is a lease, not a status: a claimed delivery stays `Pending`, and a worker that dies never strands it — the lease simply expires. Exhausted deliveries (`attempts >= maxAttempts`) are handed out too, because only the caller can mark them `Failed`.
 
 ### ReplayGuard
 
@@ -319,21 +369,56 @@ Test-only `WebhookDeliveryStorage` implementation. Implements `IteratorAggregate
 
 | Method | Description |
 |---|---|
-| `save(delivery)` | Stores a delivery record |
+| `save(delivery)` | Stores a delivery record; keeps the stored status of one already there |
 | `findPending(limit)` | Returns pending deliveries |
+| `claimReady(now, readyThresholds, maxAttempts, leaseSeconds?, limit?)` | Leases ready deliveries — same contract as the DB backend |
+| `releaseClaim(delivery)` | Gives a lease back early |
 | `markDelivered(delivery)` | Sets status to `Delivered` |
 | `markFailed(delivery)` | Sets status to `Failed` |
 | `getById(id)` | Loads a delivery by ID |
-| `clear()` | Removes all records |
+| `clear()` | Removes all records and leases |
 
 ## Security
 
 - Signature comparison uses `hash_equals()` — safe against timing attacks.
-- `WebhookDelivery` stores only the endpoint URL, never the secret.
+- The canonical message is length-prefixed, so it parses into exactly one
+  (eventId, timestamp, payload) triple. A custom `WebhookSigner` must keep that
+  property: concatenating variable-length components with a separator that can
+  occur inside them lets an intercepted delivery be re-framed around the same
+  signature, with a different payload and a different replay-guard nonce.
+- `WebhookDelivery` stores only the endpoint URL, never the secret. Credentials
+  in the URL are rejected for that reason — the URL is stored verbatim on every
+  delivery row; use `headers` for authentication.
 - All secret parameters are marked `#[\SensitiveParameter]` — they do not appear in stack traces.
 - Always validate timestamps (tolerance) to prevent replay of old signatures.
 - Use `ReplayGuard` with a persistent `NonceStorage` in production; storage
   implementations must reject duplicates atomically.
+
+### SSRF: the endpoint URL is untrusted input
+
+Wherever users register their own webhook endpoints, the destination URL is
+attacker-controlled and your delivery worker runs inside the trusted network.
+`WebhookEndpoint` therefore rejects credentials in the URL and hosts that are
+loopback, private, link-local or otherwise reserved IP literals — including
+`169.254.169.254`, the cloud metadata address. `allowPrivateNetwork: true` opts
+a single endpoint back in.
+
+That check alone is not an anti-SSRF policy, and the constructor deliberately
+does not resolve host names. The dispatcher owns the rest:
+
+- **Resolve and filter at delivery time.** A name that resolves into a private
+  range is an SSRF target whatever the URL looks like, and DNS can change
+  between registration and delivery.
+- **Refuse redirects, or re-check every hop.** A URL that passed every check can
+  redirect into the internal network. Guzzle follows up to 5 redirects by
+  default: `new Client(['allow_redirects' => false])`.
+- **Set timeouts.** Guzzle's default `timeout` is `0` — a receiver that accepts
+  the connection and never answers parks the worker forever.
+- **Do not hand response bodies back to the registrant.** `lastError` is returned
+  by delivery-status APIs; an internal response echoed there is the payoff of
+  the attack.
+
+See [examples/dispatcher.php](examples/dispatcher.php) for the client defaults.
 
 ## Examples
 

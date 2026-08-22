@@ -89,9 +89,101 @@ final class HmacSha256SignerTest
     public function knownSignatureValue(): void
     {
         $sig = $this->fixture->sign(payload: '{}', secret: self::SECRET, timestamp: self::TIMESTAMP, eventId: self::EVENT_ID);
-        $expected = hash_hmac('sha256', self::EVENT_ID . '.' . self::TIMESTAMP . '.{}', self::SECRET);
+        $expected = hash_hmac(
+            'sha256',
+            '10.' . self::EVENT_ID . '.' . self::TIMESTAMP . '.2.{}',
+            self::SECRET,
+        );
 
         Assert::same($sig->getValue(), $expected);
+    }
+
+    /**
+     * The canonicalisation bug this test pins: with `eventId.timestamp.payload`
+     * and no length prefixes, an event id ending in `.<digits>` produced bytes
+     * that also parse as a different (eventId, timestamp, payload) triple, so
+     * an attacker could re-frame an intercepted delivery with a payload of
+     * their choosing, keep the signature, and land a different nonce past the
+     * replay guard.
+     */
+    public function shiftedFramingOfDottedEventIdNoLongerShareSignature(): void
+    {
+        $original = $this->fixture->sign(
+            payload: '{"amount":100}',
+            secret: self::SECRET,
+            timestamp: 1755600300,
+            eventId: 'order.1755600000',
+        );
+        $shifted = $this->fixture->sign(
+            payload: '1755600300.{"amount":100}',
+            secret: self::SECRET,
+            timestamp: 1755600000,
+            eventId: 'order',
+        );
+
+        Assert::notSame($shifted->getValue(), $original->getValue());
+
+        // ...and the retired canonicalisation really did collide on this pair
+        $retired = static fn(string $eventId, int $timestamp, string $payload): string => hash_hmac(
+            'sha256',
+            $eventId . '.' . $timestamp . '.' . $payload,
+            self::SECRET,
+        );
+
+        Assert::same(
+            $retired('order', 1755600000, '1755600300.{"amount":100}'),
+            $retired('order.1755600000', 1755600300, '{"amount":100}'),
+        );
+    }
+
+    /**
+     * Generalisation of the case above: for any event id of the shape
+     * `<prefix>.<digits>`, the shifted framing that moves the digits into the
+     * timestamp slot and the timestamp into the payload must never produce the
+     * same signature. Under the retired canonicalisation every single input
+     * here was a collision.
+     */
+    #[Property(runs: 200, timeoutMs: 500)]
+    public function shiftedFramingNeverSharesSignature(string $prefix, int $digits, int $timestamp, string $payload): void
+    {
+        $original = $this->fixture->sign(
+            payload: $payload,
+            secret: self::SECRET,
+            timestamp: $timestamp,
+            eventId: $prefix . '.' . $digits,
+        );
+        $shifted = $this->fixture->sign(
+            payload: $timestamp . '.' . $payload,
+            secret: self::SECRET,
+            timestamp: $digits,
+            eventId: $prefix,
+        );
+
+        Assert::notSame($shifted->getValue(), $original->getValue());
+    }
+
+    /** @return array<string, ArbitraryInterface> */
+    public static function shiftedFramingNeverSharesSignatureGenerators(): array
+    {
+        return [
+            'prefix' => Gen::stringFrom(alphabet: 'abcdefghijklmnopqrstuvwxyz_-', minLength: 1, maxLength: 12),
+            // both land in a timestamp slot, and WebhookSignature rejects <= 0
+            'digits' => Gen::intPositive(),
+            'timestamp' => Gen::intPositive(),
+            'payload' => Gen::stringAscii(),
+        ];
+    }
+
+    /** @return iterable<string, array{string, int, int, string}> */
+    public static function shiftedFramingNeverSharesSignatureExamples(): iterable
+    {
+        // the exact shape from the review: a domain id whose suffix reads as a
+        // timestamp inside the verifier's tolerance window
+        yield 'order id with a timestamp suffix' => ['order', 1755600000, 1755600300, '{"amount":100}'];
+        // digits that are a prefix of the timestamp — the framing shift moves a
+        // partial number, which a naive "split on the last dot" fix would miss
+        yield 'digit prefix of the timestamp' => ['evt', 1, 1755600300, '{}'];
+        yield 'empty payload' => ['a', 2, 3, ''];
     }
 
     /**
