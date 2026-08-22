@@ -183,15 +183,25 @@ use Rasuvaeff\Yii3Webhooks\ClaimingDeliveryStorage;
 
 $now = $clock->now();
 
-$batch = $storage instanceof ClaimingDeliveryStorage
-    ? $storage->claimReady(
-        now: $now,
-        readyThresholds: $policy->readyThresholds($now),
-        maxAttempts: $policy->getMaxAttempts(),
-        leaseSeconds: 300,
-        limit: 100,
-    )
-    : $storage->findPending();
+if (!$storage instanceof ClaimingDeliveryStorage) {
+    // There is no safe fallback here. findPending() would hand this batch to
+    // every other worker as well, and each of them would POST it — so a
+    // storage that cannot claim is a configuration error for this worker, not
+    // a degraded mode. Run one worker (see "Tracking deliveries" above) or
+    // switch to a storage that claims.
+    throw new RuntimeException(sprintf(
+        '%s cannot claim deliveries; running more than one worker on it delivers every webhook twice',
+        $storage::class,
+    ));
+}
+
+$batch = $storage->claimReady(
+    now: $now,
+    readyThresholds: $policy->readyThresholds($now),
+    maxAttempts: $policy->getMaxAttempts(),
+    leaseSeconds: 300,
+    limit: 100,
+);
 
 foreach ($batch as $delivery) {
     // ... deliver, then move it out of the claim:
@@ -236,6 +246,8 @@ A `WebhookDelivery` carries the event's id, type and destination — not its pay
 
 A URL whose host is a loopback, private, link-local or otherwise reserved IP literal (`127.0.0.1`, `10.0.0.5`, `169.254.169.254`, `[::1]`, `localhost`) is rejected — see [Security](#security). Pass `allowPrivateNetwork: true` for endpoints that are meant to stay inside the perimeter. Credentials in the URL (`https://user:pass@host/`) are rejected outright: they are a secret, and the delivery record stores the URL verbatim. Use `headers` for authentication.
 
+The host is compared as a resolver sees it: a single trailing dot is the DNS root label, so `localhost.` and `127.0.0.1.` are rejected exactly like `localhost` and `127.0.0.1`, and `https://./hook` is rejected as a URL with no host. Public hosts written with a root label (`https://partner.example.com./hook`) are accepted, and `getUrl()` returns whatever was passed in — the normalisation is for the checks only, never for the stored URL.
+
 ### WebhookSignature
 
 | Method | Description |
@@ -259,6 +271,8 @@ Interface for outbound signature implementations. Custom signers must sign the e
 Signs `"{len(eventId)}.{eventId}.{timestamp}.{len(payload)}.{payload}"` with the secret using HMAC-SHA256. `payload` is the exact HTTP body string, not a re-encoded JSON value.
 
 The length prefixes are what makes the message canonical: `.` is legal inside an event id, so without them one signed string parses into several different (eventId, timestamp, payload) triples and an intercepted delivery can be re-framed around the same signature.
+
+> **Upgrading from 1.x: the signature bytes changed.** 1.x signed `"{eventId}.{timestamp}.{payload}"`. A receiver on 1.x rejects a 2.0 signature and a receiver on 2.0 rejects a 1.x one, so no rollout order avoids a gap — the receivers need a window in which they accept both framings. [UPGRADE.md](UPGRADE.md) has the five-line legacy `WebhookSigner` and the three-step order (receivers accept both → sender upgrades → receivers drop the legacy branch). Receivers you do not control need coordination, not a rollout order. Note that `roave/backward-compatibility-check` reports this release as clean: it compares the PHP API, and this break is on the wire.
 
 | Method | Description |
 |---|---|
@@ -312,7 +326,7 @@ Interface for persistence backends. Core ships `InMemoryDeliveryStorage` for tes
 | `markFailed(delivery)` | Marks a delivery as failed, if it is still pending |
 | `getById(id)` | Loads a delivery by ID |
 
-The status of a delivery that already exists is deliberately not written by `save()`: a worker holding a stale copy would otherwise put a finished delivery back into `Pending` and deliver the same webhook again.
+The status of a delivery that already exists is deliberately not written by `save()`: a worker holding a stale copy would otherwise put a finished delivery back into `Pending` and deliver the same webhook again. `markDelivered()` and `markFailed()` are the only methods that ever write a status — claiming is not one of them.
 
 ### ClaimingDeliveryStorage
 
@@ -324,6 +338,8 @@ Optional interface, extending `WebhookDeliveryStorage`, for backends that can ha
 | `releaseClaim(delivery)` | Gives a lease back early; `true` when one was cleared |
 
 Ownership is a lease, not a status: a claimed delivery stays `Pending`, and a worker that dies never strands it — the lease simply expires. Exhausted deliveries (`attempts >= maxAttempts`) are handed out too, because only the caller can mark them `Failed`.
+
+If you implement this interface, `claimReady()` writes the lease and nothing else. Moving the status to a "claimed"/"in-flight" value instead would put every claimed delivery outside the `Pending` that `markDelivered()`/`markFailed()` compare against, and their compare-and-set would silently stop recording outcomes.
 
 ### ReplayGuard
 
@@ -396,6 +412,17 @@ Test-only `WebhookDeliveryStorage` implementation. Implements `IteratorAggregate
 - `WebhookDelivery` stores only the endpoint URL, never the secret. Credentials
   in the URL are rejected for that reason — the URL is stored verbatim on every
   delivery row; use `headers` for authentication.
+- **The endpoint URL is itself sensitive — it is not safe to log as-is.** A
+  query string is accepted (`https://host/hook?token=…` is how a receiver with
+  no other channel identifies itself) and stored verbatim, so a delivery record
+  can carry the receiver's credential in plain sight. Redact query and fragment
+  before the URL reaches a log, a metric label, an error report or a support
+  screen:
+
+  ```php
+  $parts = parse_url($delivery->getEndpointUrl());
+  $safe = ($parts['scheme'] ?? 'https') . '://' . ($parts['host'] ?? '') . ($parts['path'] ?? '');
+  ```
 - All secret parameters are marked `#[\SensitiveParameter]` — they do not appear in stack traces.
 - Always validate timestamps (tolerance) to prevent replay of old signatures.
 - Use `ReplayGuard` with a persistent `NonceStorage` in production; storage

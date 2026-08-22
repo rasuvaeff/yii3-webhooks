@@ -30,30 +30,54 @@ retry policy for webhooks. No HTTP client dependency — you implement
    hash_hmac('sha256', $payload, $secret) === $received;                                 // wrong: timing leak, wrong message
    ```
 
+   **The receiver must be able to verify this framing.** 1.x of this package
+   signed `"{eventId}.{timestamp}.{payload}"` without the length prefixes, and
+   the two are mutually unacceptable: a receiver on either version rejects the
+   other's signature outright. Before letting a sender go to 2.0, confirm every
+   receiver either runs 2.0 or accepts both framings for a window — a legacy
+   `WebhookSigner` plus a second `WebhookVerifier`, dropped once the sender has
+   been on 2.0 longer than the timestamp tolerance. `UPGRADE.md` in the package
+   has the legacy signer and the order. Receivers outside your control need
+   coordination and a date, not a rollout order. `roave/backward-compatibility-check`
+   passes this change — it compares the PHP API, not the bytes on the wire.
+
 2. **Replay protection is mandatory on inbound endpoints.** A valid signature
    alone is replayable within the timestamp tolerance. Use the event ID from
    the `X-Webhook-Id` header as the nonce: `ReplayGuard::accept($eventId)`
    throws `RuntimeException` on a duplicate; `NonceStorage::add()` must be
    atomic and return `false` on duplicates.
 
-3. **Secrets never go in URLs or logs.** Transport the signature via the
-   `X-Webhook-Signature: t={ts},v1={hex}` header and the secret via
-   config/DI. `WebhookDelivery` deliberately stores only `endpointUrl` —
-   never add the secret to it; it is safe to log as-is. `WebhookEndpoint`
-   rejects credentials in the URL for the same reason.
+3. **Secrets never go in URLs or logs — and the endpoint URL counts as one.**
+   Transport the signature via the `X-Webhook-Signature: t={ts},v1={hex}` header
+   and the secret via config/DI. `WebhookDelivery` deliberately stores only
+   `endpointUrl` — never add the secret to it. That does **not** make a delivery
+   safe to log as-is: `WebhookEndpoint` rejects credentials in the URL but
+   accepts a query string, and stores the URL verbatim, so
+   `https://host/hook?token=…` puts the receiver's credential into every log
+   line, metric label and error report that echoes the delivery. Redact query
+   and fragment first:
+
+   ```php
+   $parts = parse_url($delivery->getEndpointUrl());
+   $safe = ($parts['scheme'] ?? 'https') . '://' . ($parts['host'] ?? '') . ($parts['path'] ?? '');
+   ```
 
 4. **The endpoint URL is attacker-controlled input.** `WebhookEndpoint` blocks
-   loopback/private/link-local/reserved IP literals (`allowPrivateNetwork: true`
-   opts back in) but does not resolve host names: your dispatcher must
-   resolve-and-filter, refuse redirects (or re-check every hop) and set
-   timeouts. Guzzle's defaults do neither.
+   loopback/private/link-local/reserved IP literals — including the root-label
+   spellings `localhost.` and `127.0.0.1.`, which resolvers treat as the same
+   names (`allowPrivateNetwork: true` opts back in) — but does not resolve host
+   names: your dispatcher must resolve-and-filter, refuse redirects (or re-check
+   every hop) and set timeouts. Guzzle's defaults do neither.
 
 5. **More than one delivery worker => claim, do not poll.** `findPending()`
-   hands the same deliveries to every worker and ignores backoff. Use
-   `$storage instanceof ClaimingDeliveryStorage` and `claimReady()`, then mark
-   or `releaseClaim()` everything it returned. `save()` never changes the status
-   of a delivery that already exists — that is what stops a stale copy from
-   resurrecting a finished one.
+   hands the same deliveries to every worker and ignores backoff, so it is not a
+   fallback: `instanceof ClaimingDeliveryStorage ? claimReady() : findPending()`
+   silently delivers every webhook once per worker. Throw instead, and run a
+   single worker against a storage that cannot claim. Mark or `releaseClaim()`
+   everything `claimReady()` returned. `save()` never changes the status of a
+   delivery that already exists, and neither does a claim — only
+   `markDelivered()`/`markFailed()` write a status, which is what stops a stale
+   copy from resurrecting a finished delivery.
 
 6. **`WebhookVerifier::verify()` returns `bool` — it does not throw.**
    Reject the request yourself on `false`. Timestamp tolerance

@@ -188,15 +188,25 @@ use Rasuvaeff\Yii3Webhooks\ClaimingDeliveryStorage;
 
 $now = $clock->now();
 
-$batch = $storage instanceof ClaimingDeliveryStorage
-    ? $storage->claimReady(
-        now: $now,
-        readyThresholds: $policy->readyThresholds($now),
-        maxAttempts: $policy->getMaxAttempts(),
-        leaseSeconds: 300,
-        limit: 100,
-    )
-    : $storage->findPending();
+if (!$storage instanceof ClaimingDeliveryStorage) {
+    // Безопасного fallback-а здесь нет. findPending() отдаст эту же пачку
+    // каждому другому worker-у, и каждый её отправит POST-ом. Storage без
+    // захвата — это ошибка конфигурации для такого worker-а, а не деградация.
+    // Либо один worker (см. «Отслеживание доставок» выше), либо storage,
+    // умеющий захватывать.
+    throw new RuntimeException(sprintf(
+        '%s cannot claim deliveries; running more than one worker on it delivers every webhook twice',
+        $storage::class,
+    ));
+}
+
+$batch = $storage->claimReady(
+    now: $now,
+    readyThresholds: $policy->readyThresholds($now),
+    maxAttempts: $policy->getMaxAttempts(),
+    leaseSeconds: 300,
+    limit: 100,
+);
 
 foreach ($batch as $delivery) {
     // ... доставили, затем вывели из захвата:
@@ -256,6 +266,13 @@ IP-литерал (`127.0.0.1`, `10.0.0.5`, `169.254.169.254`, `[::1]`, `localho
 (`https://user:pass@host/`) отклоняются: это секрет, а запись о доставке хранит
 URL дословно. Для аутентификации используйте `headers`.
 
+Host сравнивается так, как его видит резолвер: одна завершающая точка — это
+корневая метка DNS, поэтому `localhost.` и `127.0.0.1.` отклоняются ровно так же,
+как `localhost` и `127.0.0.1`, а `https://./hook` отклоняется как URL без host-а.
+Публичные host-ы с корневой меткой (`https://partner.example.com./hook`)
+принимаются, а `getUrl()` возвращает ровно то, что передали: нормализация нужна
+только проверкам и никогда не трогает сохранённый URL.
+
 ### WebhookSignature
 
 | Метод | Описание |
@@ -285,6 +302,17 @@ URL дословно. Для аутентификации используйте
 поэтому без них одна подписанная строка разбирается на несколько разных троек
 (eventId, timestamp, payload), и перехваченную доставку можно пересобрать под
 той же подписью.
+
+> **Апгрейд с 1.x: байты подписи изменились.** 1.x подписывала
+> `"{eventId}.{timestamp}.{payload}"`. Получатель на 1.x отвергнет подпись 2.0,
+> получатель на 2.0 отвергнет подпись 1.x — поэтому никакой порядок выкатки не
+> убирает разрыв: получателю нужно окно, в котором он принимает оба формата.
+> В [UPGRADE.md](UPGRADE.md) — legacy-`WebhookSigner` на пять строк и порядок из
+> трёх шагов (получатели принимают оба → отправитель переходит на 2.0 →
+> получатели убирают legacy-ветку). С получателями, которыми вы не управляете,
+> нужен не порядок выкатки, а согласование. И учтите:
+> `roave/backward-compatibility-check` считает релиз чистым — он сравнивает
+> PHP-API, а слом здесь на проводе.
 
 | Метод | Описание |
 |---|---|
@@ -341,7 +369,8 @@ URL дословно. Для аутентификации используйте
 
 Статус уже существующей доставки `save()` намеренно не пишет: иначе worker со
 устаревшей копией вернул бы завершённую доставку в `Pending` — и тот же webhook
-ушёл бы получателю второй раз.
+ушёл бы получателю второй раз. Статус пишут только `markDelivered()` и
+`markFailed()` — захват в это число не входит.
 
 ### ClaimingDeliveryStorage
 
@@ -358,6 +387,11 @@ URL дословно. Для аутентификации используйте
 упавший worker её не «подвешивает» — lease просто истекает. Исчерпавшие попытки
 доставки (`attempts >= maxAttempts`) тоже выдаются: пометить их `Failed` может
 только вызывающий.
+
+Если вы реализуете этот интерфейс: `claimReady()` пишет lease и больше ничего.
+Перевод статуса в «claimed»/«in-flight» вывел бы каждую захваченную доставку
+из-под `Pending`, с которым сравнивают `markDelivered()`/`markFailed()`, и их
+compare-and-set молча перестал бы фиксировать исходы.
 
 ### ReplayGuard
 
@@ -434,6 +468,17 @@ Backed string enum с тремя случаями:
 - `WebhookDelivery` хранит только URL эндпоинта, но не секрет. Именно поэтому
   credentials в URL отклоняются: URL дословно сохраняется в каждой записи о
   доставке; для аутентификации есть `headers`.
+- **Сам URL эндпоинта чувствителен — логировать его как есть нельзя.** Query
+  принимается (`https://host/hook?token=…` — то, чем получатель без другого
+  канала себя аутентифицирует) и сохраняется дословно, поэтому запись о доставке
+  может нести credential получателя открытым текстом. Вырезайте query и fragment
+  до того, как URL попадёт в лог, в метку метрики, в отчёт об ошибке или на
+  экран поддержки:
+
+  ```php
+  $parts = parse_url($delivery->getEndpointUrl());
+  $safe = ($parts['scheme'] ?? 'https') . '://' . ($parts['host'] ?? '') . ($parts['path'] ?? '');
+  ```
 - Все параметры-секреты помечены `#[\SensitiveParameter]` — они не появятся в stack trace.
 - Всегда валидируйте timestamp (допуск), чтобы предотвратить replay старых подписей.
 - Используйте `ReplayGuard` с персистентным `NonceStorage` в production; реализации

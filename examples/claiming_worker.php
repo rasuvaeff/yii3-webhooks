@@ -43,26 +43,30 @@ $storage->save(WebhookDelivery::create(
 )->withAttempt(at: $now->modify('-2 seconds'), error: 'HTTP 503'));
 
 /**
- * What a worker iteration looks like — the fallback keeps it working against a
- * storage that cannot claim.
+ * What a worker iteration looks like.
+ *
+ * There is deliberately no fallback to findPending() here: it hands the same
+ * deliveries to every worker polling the storage, so falling back would turn a
+ * missing capability into duplicate deliveries nobody notices. A storage that
+ * cannot claim means run one worker — see examples/delivery_tracking.php.
  *
  * @return list<WebhookDelivery>
  */
 $poll = static function (WebhookDeliveryStorage $storage, DateTimeImmutable $now) use ($policy): array {
-    if ($storage instanceof ClaimingDeliveryStorage) {
-        return $storage->claimReady(
-            now: $now,
-            readyThresholds: $policy->readyThresholds($now),
-            maxAttempts: $policy->getMaxAttempts(),
-            leaseSeconds: 300,
-            limit: 100,
-        );
+    if (!$storage instanceof ClaimingDeliveryStorage) {
+        throw new RuntimeException(sprintf(
+            '%s cannot claim deliveries; running more than one worker on it delivers every webhook twice',
+            $storage::class,
+        ));
     }
 
-    return array_values(array_filter(
-        $storage->findPending(),
-        static fn(WebhookDelivery $delivery): bool => $policy->isReadyForRetry($delivery, $now),
-    ));
+    return $storage->claimReady(
+        now: $now,
+        readyThresholds: $policy->readyThresholds($now),
+        maxAttempts: $policy->getMaxAttempts(),
+        leaseSeconds: 300,
+        limit: 100,
+    );
 };
 
 $first = $poll($storage, $now);

@@ -19,10 +19,17 @@ use DateTimeImmutable;
  * third-party storage. A worker picks the path with `instanceof`:
  *
  * ```php
- * $batch = $storage instanceof ClaimingDeliveryStorage
- *     ? $storage->claimReady($now, $policy->readyThresholds($now), $policy->getMaxAttempts())
- *     : $storage->findPending();
+ * if (!$storage instanceof ClaimingDeliveryStorage) {
+ *     throw new RuntimeException($storage::class . ' cannot claim; run a single worker instead');
+ * }
+ *
+ * $batch = $storage->claimReady($now, $policy->readyThresholds($now), $policy->getMaxAttempts());
  * ```
+ *
+ * The `else` branch is a throw and not a call to
+ * {@see WebhookDeliveryStorage::findPending()} on purpose: falling back to the
+ * plain read is exactly the double delivery this interface exists to prevent,
+ * and it fails silently — the receiver sees duplicates, the worker sees nothing.
  *
  * Ownership is a lease, not a status: a claimed delivery stays `Pending` and
  * becomes claimable again once its lease expires, so a worker killed mid-flight
@@ -35,6 +42,15 @@ interface ClaimingDeliveryStorage extends WebhookDeliveryStorage
     /**
      * Atomically leases up to $limit pending deliveries that are ready for
      * another attempt, and returns them.
+     *
+     * The claim owns the lease and only the lease. It must leave the status
+     * alone: a claimed delivery is still `Pending`, and
+     * {@see WebhookDeliveryStorage::markDelivered()} /
+     * {@see WebhookDeliveryStorage::markFailed()} stay the only methods that
+     * ever write one. An implementation that moved the status into a
+     * "claimed"/"in-flight" value would take every claimed delivery out of the
+     * `Pending` those two compare against, and every outcome after a claim
+     * would be dropped as a no-op.
      *
      * A delivery qualifies when its lease is free — never claimed, or claimed
      * longer than $leaseSeconds ago — and any of the following holds:

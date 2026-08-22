@@ -24,17 +24,29 @@ composer require rasuvaeff/yii3-webhooks
 - Send `X-Webhook-Id: {eventId}` and `X-Webhook-Signature: t={ts},v1={hex}` headers.
 - Verify inbound: `WebhookVerifier::verify(payload, secret, signature, eventId)` returns bool.
 - Use `hash_equals()` internally — never `===` for signatures.
-- `WebhookDelivery` stores only `endpointUrl`, never the secret.
+- Signing changed in 2.0: 1.x signed `"{eventId}.{timestamp}.{payload}"`. Neither
+  version accepts the other's signature, so receivers need a window accepting
+  both framings — legacy signer + rollout order in UPGRADE.md. roave reports the
+  release clean; it compares the PHP API, not the wire.
+- `WebhookDelivery` stores only `endpointUrl`, never the secret — but the URL is
+  itself sensitive and NOT safe to log as-is: a query string is accepted and
+  stored verbatim, so `https://host/hook?token=…` puts the receiver's credential
+  in every log line. Redact query and fragment before logging.
 - `WebhookEndpoint` rejects credentials in the URL and loopback/private/link-local/
   reserved IP literals (`127.0.0.1`, `10.0.0.5`, `169.254.169.254`, `[::1]`,
-  `localhost`); `allowPrivateNetwork: true` opts one endpoint back in. It does not
-  resolve host names — the dispatcher must resolve-and-filter, refuse redirects
-  (or re-check each hop) and set timeouts.
-- `save()` never writes the status of a delivery that already exists — status
-  belongs to `markDelivered()`/`markFailed()`/the claim. Otherwise a stale copy
-  resurrects a finished delivery.
+  `localhost`); `allowPrivateNetwork: true` opts one endpoint back in. A single
+  trailing dot is the DNS root label and is stripped before the checks, so
+  `localhost.`/`127.0.0.1.` are rejected too and `https://./hook` is a URL with no
+  host; `getUrl()` still returns the URL verbatim. It does not resolve host names
+  — the dispatcher must resolve-and-filter, refuse redirects (or re-check each
+  hop) and set timeouts.
+- `save()` never writes the status of a delivery that already exists — only
+  `markDelivered()`/`markFailed()` ever write one. A claim writes a lease, not a
+  status: the claimed delivery stays `Pending`. Otherwise a stale copy resurrects
+  a finished delivery.
 - More than one worker => the storage must implement `ClaimingDeliveryStorage`;
-  `findPending()` hands the same rows to everyone and ignores backoff.
+  `findPending()` hands the same rows to everyone and ignores backoff, and is not
+  a fallback — no claim means run one worker.
 - `markDelivered()`/`markFailed()` are a compare-and-set on `Pending` — marking a
   delivery somebody else already finished is a silent no-op, in every storage.
 - `NonceStorage::add()` must be atomic and return false on duplicate nonce.
@@ -130,16 +142,19 @@ $policy->nextDelaySeconds($delivery->getAttempts()); // seconds until next attem
 use Rasuvaeff\Yii3Webhooks\ClaimingDeliveryStorage;
 
 // ClaimingDeliveryStorage extends WebhookDeliveryStorage; InMemoryDeliveryStorage
-// and rasuvaeff/yii3-webhooks-db implement it.
-$batch = $storage instanceof ClaimingDeliveryStorage
-    ? $storage->claimReady(
-        now: $now,
-        readyThresholds: $policy->readyThresholds($now), // attempts => latest ready lastAttemptAt
-        maxAttempts: $policy->getMaxAttempts(),
-        leaseSeconds: 300,   // must outlive the slowest attempt
-        limit: 100,
-    )
-    : $storage->findPending();
+// and rasuvaeff/yii3-webhooks-db implement it. There is no fallback to
+// findPending() in a multi-worker loop: it hands the same batch to every worker.
+if (!$storage instanceof ClaimingDeliveryStorage) {
+    throw new RuntimeException($storage::class . ' cannot claim; run a single worker instead');
+}
+
+$batch = $storage->claimReady(
+    now: $now,
+    readyThresholds: $policy->readyThresholds($now), // attempts => latest ready lastAttemptAt
+    maxAttempts: $policy->getMaxAttempts(),
+    leaseSeconds: 300,   // must outlive the slowest attempt
+    limit: 100,
+);
 
 foreach ($batch as $delivery) {
     // deliver, then leave the claim:
