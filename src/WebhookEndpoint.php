@@ -22,6 +22,13 @@ use InvalidArgumentException;
  * redirect hop, belongs to the dispatcher — see the Security section of the
  * README.
  *
+ * The URL is kept exactly as it was given, and a {@see WebhookDelivery} stores
+ * it verbatim. Credentials are rejected for that reason; a query string is not,
+ * because `https://host/hook?token=…` is a legitimate routing scheme for a
+ * receiver that has no other way to identify itself. That makes the endpoint
+ * URL sensitive in its own right: redact the query and the fragment before it
+ * reaches a log, a metric label or an error report.
+ *
  * @api
  */
 final readonly class WebhookEndpoint
@@ -62,7 +69,7 @@ final readonly class WebhookEndpoint
             throw new InvalidArgumentException('Endpoint URL must not contain credentials');
         }
 
-        $host = $parts['host'] ?? '';
+        $host = self::withoutRootLabel($parts['host'] ?? '');
 
         if ($host === '') {
             throw new InvalidArgumentException('Endpoint URL must contain a host');
@@ -104,6 +111,28 @@ final readonly class WebhookEndpoint
     public function allowsPrivateNetwork(): bool
     {
         return $this->allowPrivateNetwork;
+    }
+
+    /**
+     * The host as a resolver sees it: without the DNS root label — the single
+     * trailing dot that makes a name absolute.
+     *
+     * Every resolver strips it, so `localhost.` and `localhost` are the same
+     * name, but the two strings are not: comparing the URL's spelling let
+     * `https://localhost./hook` walk past every check below —
+     * `inet_pton('localhost.')` fails too, so it was classified as an
+     * unresolvable host name and accepted. The same held for `127.0.0.1.`.
+     *
+     * A host of `.` normalises to the empty string and is rejected as a missing
+     * host, which is what `https://./hook` always should have been.
+     *
+     * Exactly one dot comes off, not a run of them: a second empty label
+     * (`localhost..`) is not a name any resolver accepts, so nothing is gained
+     * by canonicalising it into one that is.
+     */
+    private static function withoutRootLabel(string $host): string
+    {
+        return str_ends_with($host, '.') ? substr($host, 0, -1) : $host;
     }
 
     /**

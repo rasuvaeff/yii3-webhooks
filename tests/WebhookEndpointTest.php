@@ -190,6 +190,12 @@ final class WebhookEndpointTest
         yield 'loopback ipv6' => ['http://[::1]/hook'];
         yield 'localhost' => ['http://localhost:8080/hook'];
         yield 'localhost subdomain' => ['http://api.localhost/hook'];
+        // a single trailing dot is the DNS root label: every resolver strips it,
+        // so these are the same names as the two above — but string comparison
+        // is not, and `localhost.` used to sail through the whole check
+        yield 'localhost with a root label' => ['http://localhost./hook'];
+        yield 'localhost subdomain with a root label' => ['http://api.localhost./hook'];
+        yield 'loopback ipv4 with a root label' => ['http://127.0.0.1./hook'];
         yield 'cloud metadata' => ['http://169.254.169.254/latest/meta-data/'];
         yield 'private 10/8' => ['http://10.0.0.5:8123/hook'];
         yield 'private 172.16/12' => ['http://172.16.0.1/hook'];
@@ -231,6 +237,45 @@ final class WebhookEndpointTest
         $endpoint = new WebhookEndpoint(url: 'https://8.8.8.8/hook', secret: 'secret');
 
         Assert::same($endpoint->getUrl(), 'https://8.8.8.8/hook');
+    }
+
+    /**
+     * The root label is stripped for the checks only — an accepted URL is still
+     * stored exactly as it was written, because that is what a delivery row and
+     * every dispatcher downstream receive.
+     */
+    public function acceptsPublicHostWithRootLabelAndKeepsTheUrlVerbatim(): void
+    {
+        $endpoint = new WebhookEndpoint(url: 'https://partner.example.com./hook', secret: 'secret');
+
+        Assert::same($endpoint->getUrl(), 'https://partner.example.com./hook');
+    }
+
+    /**
+     * A host that is nothing but the root label normalises to no host at all,
+     * which is what `https://./hook` has always been — it used to pass the
+     * host-name pattern and be accepted as an unresolvable name.
+     */
+    public function throwsOnHostThatIsOnlyARootLabel(): void
+    {
+        try {
+            new WebhookEndpoint(url: 'https://./hook', secret: 'secret');
+            Assert::fail('Expected InvalidArgumentException');
+        } catch (InvalidArgumentException $e) {
+            Assert::string($e->getMessage())->contains('Endpoint URL must contain a host');
+        }
+    }
+
+    /**
+     * Only one dot comes off. `localhost..` carries an empty label, no resolver
+     * accepts it, and turning it into `localhost` would invent a meaning the
+     * name does not have.
+     */
+    public function stripsExactlyOneRootLabel(): void
+    {
+        $endpoint = new WebhookEndpoint(url: 'https://localhost../hook', secret: 'secret');
+
+        Assert::same($endpoint->getUrl(), 'https://localhost../hook');
     }
 
     /**
@@ -299,7 +344,17 @@ final class WebhookEndpointTest
             [2, Gen::regex('192\.168\.(0|[1-9]\d?)\.(0|[1-9]\d?)')],
             [2, Gen::regex('169\.254\.(0|[1-9]\d?)\.(0|[1-9]\d?)')],
             [1, Gen::regex('\[fe80::\d{1,3}\]')],
-            [2, Gen::elements(['localhost', 'api.localhost', '[::1]', '0.0.0.0'])],
+            // `localhost.` and friends carry the DNS root label — the same
+            // names, so the same verdict
+            [2, Gen::elements([
+                'localhost',
+                'api.localhost',
+                '[::1]',
+                '0.0.0.0',
+                'localhost.',
+                'api.localhost.',
+                '127.0.0.1.',
+            ])],
         ]);
     }
 
@@ -310,6 +365,9 @@ final class WebhookEndpointTest
             [2, Gen::regex('[89]\.(0|[1-9]\d?)\.(0|[1-9]\d?)\.(0|[1-9]\d?)')],
             [3, Gen::regex('[a-z]{2,8}\.example\.(com|net|org)')],
             [3, Gen::regex('[a-z]{2,8}\.[a-z]{2,6}')],
+            // the root label must not turn an ordinary endpoint into a rejected
+            // one either — stripping it is a normalisation, not a filter
+            [2, Gen::regex('[a-z]{2,8}\.[a-z]{2,6}\.')],
         ]);
     }
 }
