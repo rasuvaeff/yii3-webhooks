@@ -103,15 +103,13 @@ final class InMemoryDeliveryStorage implements ClaimingDeliveryStorage, Iterator
     #[\Override]
     public function markDelivered(WebhookDelivery $delivery): void
     {
-        $this->deliveries[$delivery->getId()] = $delivery->withStatus(WebhookDeliveryStatus::Delivered);
-        unset($this->claims[$delivery->getId()]);
+        $this->markTerminal(delivery: $delivery, status: WebhookDeliveryStatus::Delivered);
     }
 
     #[\Override]
     public function markFailed(WebhookDelivery $delivery): void
     {
-        $this->deliveries[$delivery->getId()] = $delivery->withStatus(WebhookDeliveryStatus::Failed);
-        unset($this->claims[$delivery->getId()]);
+        $this->markTerminal(delivery: $delivery, status: WebhookDeliveryStatus::Failed);
     }
 
     #[\Override]
@@ -136,6 +134,25 @@ final class InMemoryDeliveryStorage implements ClaimingDeliveryStorage, Iterator
     {
         $this->deliveries = [];
         $this->claims = [];
+    }
+
+    /**
+     * The terminal transition is a compare-and-set on `Pending`, the same one a
+     * database backend writes as `UPDATE … WHERE id = ? AND status = 'pending'`.
+     * The loser of a race must not overwrite the winner's outcome, and a test
+     * suite that lets it here would pass on this storage and fail in production.
+     */
+    private function markTerminal(WebhookDelivery $delivery, WebhookDeliveryStatus $status): void
+    {
+        $id = $delivery->getId();
+        $stored = $this->deliveries[$id] ?? null;
+
+        if (!$stored instanceof WebhookDelivery || $stored->getStatus() !== WebhookDeliveryStatus::Pending) {
+            return;
+        }
+
+        $this->deliveries[$id] = $delivery->withStatus($status);
+        unset($this->claims[$id]);
     }
 
     private function isLeaseFree(string $id, DateTimeImmutable $leaseExpiry): bool

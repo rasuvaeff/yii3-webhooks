@@ -373,8 +373,8 @@ Test-only `WebhookDeliveryStorage` implementation. Implements `IteratorAggregate
 | `findPending(limit)` | Returns pending deliveries |
 | `claimReady(now, readyThresholds, maxAttempts, leaseSeconds?, limit?)` | Leases ready deliveries — same contract as the DB backend |
 | `releaseClaim(delivery)` | Gives a lease back early |
-| `markDelivered(delivery)` | Sets status to `Delivered` |
-| `markFailed(delivery)` | Sets status to `Failed` |
+| `markDelivered(delivery)` | Sets status to `Delivered`, if the stored delivery is still pending |
+| `markFailed(delivery)` | Sets status to `Failed`, if the stored delivery is still pending |
 | `getById(id)` | Loads a delivery by ID |
 | `clear()` | Removes all records and leases |
 

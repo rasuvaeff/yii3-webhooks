@@ -35,6 +35,8 @@ composer require rasuvaeff/yii3-webhooks
   resurrects a finished delivery.
 - More than one worker => the storage must implement `ClaimingDeliveryStorage`;
   `findPending()` hands the same rows to everyone and ignores backoff.
+- `markDelivered()`/`markFailed()` are a compare-and-set on `Pending` — marking a
+  delivery somebody else already finished is a silent no-op, in every storage.
 - `NonceStorage::add()` must be atomic and return false on duplicate nonce.
 - `ReplayGuard::accept()` throws `RuntimeException` when storage rejects a duplicate nonce.
 - Use event ID (from `X-Webhook-Id` header) as the nonce for replay protection.

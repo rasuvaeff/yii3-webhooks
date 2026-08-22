@@ -40,6 +40,13 @@
   worker that lost the race and still held a stale `Pending` copy could
   otherwise put a finished delivery back into the queue and deliver the same
   webhook again. Status belongs to `markDelivered()`/`markFailed()`/the claim.
+- `InMemoryDeliveryStorage::markDelivered()`/`markFailed()` are a compare-and-set
+  on `Pending`, matching what the database backend has always written as
+  `UPDATE … WHERE id = ? AND status = 'pending'`. The in-memory storage used to
+  overwrite a terminal status unconditionally, so a worker that lost a race could
+  turn a `Failed` delivery into a `Delivered` one — and consumer code debugged
+  against this storage behaved differently in production. Marking a delivery that
+  is unknown or already finished is now a silent no-op everywhere.
 - `WebhookRetryPolicy::nextDelaySeconds()` applies the cap before the int cast.
   An exponential policy with a large `maxAttempts` overflowed `PHP_INT_MAX`
   within a few dozen attempts, and the out-of-range cast (platform-defined,

@@ -121,6 +121,49 @@ final class InMemoryDeliveryStorageTest
         Assert::same($retrieved->getStatus(), WebhookDeliveryStatus::Failed);
     }
 
+    /**
+     * The terminal transition is a compare-and-set, exactly as a database
+     * backend writes it. A divergence here is worse than a plain bug: consumer
+     * code debugged against this storage would behave differently in production.
+     */
+    public function markDeliveredIsANoOpOnAnAlreadyFailedDelivery(): void
+    {
+        $delivery = $this->delivery('del-1');
+
+        $this->fixture->save($delivery);
+        $this->fixture->markFailed($delivery);
+        $this->fixture->markDelivered($delivery);
+
+        Assert::same($this->fixture->getById('del-1')?->getStatus(), WebhookDeliveryStatus::Failed);
+    }
+
+    public function markFailedIsANoOpOnAnAlreadyDeliveredDelivery(): void
+    {
+        $delivery = $this->delivery('del-1');
+
+        $this->fixture->save($delivery);
+        $this->fixture->markDelivered($delivery);
+        $this->fixture->markFailed($delivery);
+
+        Assert::same($this->fixture->getById('del-1')?->getStatus(), WebhookDeliveryStatus::Delivered);
+    }
+
+    public function markDeliveredIsANoOpForAnUnknownDelivery(): void
+    {
+        $this->fixture->markDelivered($this->delivery('nonexistent'));
+
+        Assert::null($this->fixture->getById('nonexistent'));
+        Assert::same(count($this->fixture), 0);
+    }
+
+    public function markFailedIsANoOpForAnUnknownDelivery(): void
+    {
+        $this->fixture->markFailed($this->delivery('nonexistent'));
+
+        Assert::null($this->fixture->getById('nonexistent'));
+        Assert::same(count($this->fixture), 0);
+    }
+
     public function countReturnsNumberOfDeliveries(): void
     {
         Assert::same($this->fixture->count(), 0);

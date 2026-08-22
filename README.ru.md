@@ -403,8 +403,8 @@ Backed string enum с тремя случаями:
 | `findPending(limit)` | Возвращает доставки в статусе `Pending` |
 | `claimReady(now, readyThresholds, maxAttempts, leaseSeconds?, limit?)` | Захватывает готовые доставки — контракт тот же, что у DB-backend-а |
 | `releaseClaim(delivery)` | Досрочно возвращает захват |
-| `markDelivered(delivery)` | Устанавливает статус `Delivered` |
-| `markFailed(delivery)` | Устанавливает статус `Failed` |
+| `markDelivered(delivery)` | Устанавливает статус `Delivered`, если сохранённая доставка ещё `Pending` |
+| `markFailed(delivery)` | Устанавливает статус `Failed`, если сохранённая доставка ещё `Pending` |
 | `getById(id)` | Загружает доставку по ID |
 | `clear()` | Удаляет все записи и захваты |
 

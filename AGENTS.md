@@ -96,6 +96,10 @@ make release-check
   lease (the delivery stays `Pending` and becomes claimable again when the lease
   expires), and `claimReady()` must also hand out deliveries with
   `attempts >= maxAttempts` — nothing else can terminate them.
+  `markDelivered()`/`markFailed()` are a compare-and-set on `Pending`: the loser
+  of a race must not overwrite the winner's outcome. `InMemoryDeliveryStorage`
+  obeys the same rule, so a consumer debugged against it behaves the same in
+  production.
 - **`WebhookEndpoint` treats the URL as attacker-controlled**: http/https only,
   a host that is a host name or IP literal, no credentials, and no loopback /
   private / link-local / reserved IP literal unless `allowPrivateNetwork: true`.
