@@ -90,7 +90,18 @@ $clock = new class implements ClockInterface {
 };
 
 $dispatcher = new GuzzleWebhookDispatcher(
-    httpClient: new Client(),
+    // Guzzle's defaults are wrong for webhook delivery in two ways, and both
+    // are security-relevant:
+    //   allow_redirects — on by default, up to 5 hops. A URL that passed every
+    //     check you made can redirect into your internal network, so either
+    //     refuse redirects (below) or re-run the anti-SSRF check on each hop.
+    //   timeout — 0 by default, i.e. no limit: one receiver that accepts the
+    //     connection and never answers parks this worker forever.
+    httpClient: new Client([
+        'allow_redirects' => false,
+        'connect_timeout' => 3,
+        'timeout' => 5,
+    ]),
     requestFactory: $factory,
     streamFactory: $factory,
     signer: new HmacSha256Signer(),

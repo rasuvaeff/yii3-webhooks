@@ -175,6 +175,68 @@ if ($policy->isReadyForRetry($delivery, $clock->now())) {
 }
 ```
 
+### Доставка несколькими worker-ами
+
+`findPending()` отдаёт одни и те же доставки каждому, кто спросил, и ничего не
+знает про backoff: два worker-а доставят одно событие дважды, а бэклог доставок,
+ждущих backoff, забивает каждую выборку — готовые доставки за пределами лимита
+голодают. Storage, реализующий `ClaimingDeliveryStorage`, закрывает и то, и
+другое:
+
+```php
+use Rasuvaeff\Yii3Webhooks\ClaimingDeliveryStorage;
+
+$now = $clock->now();
+
+if (!$storage instanceof ClaimingDeliveryStorage) {
+    // Безопасного fallback-а здесь нет. findPending() отдаст эту же пачку
+    // каждому другому worker-у, и каждый её отправит POST-ом. Storage без
+    // захвата — это ошибка конфигурации для такого worker-а, а не деградация.
+    // Либо один worker (см. «Отслеживание доставок» выше), либо storage,
+    // умеющий захватывать.
+    throw new \RuntimeException(sprintf(
+        '%s cannot claim deliveries; running more than one worker on it delivers every webhook twice',
+        $storage::class,
+    ));
+}
+
+$batch = $storage->claimReady(
+    now: $now,
+    readyThresholds: $policy->readyThresholds($now),
+    maxAttempts: $policy->getMaxAttempts(),
+    leaseSeconds: 300,
+    limit: 100,
+);
+
+foreach ($batch as $delivery) {
+    // ... доставили, затем вывели из захвата:
+    // $storage->markDelivered($delivery->withAttempt($now));
+    // $storage->markFailed($delivery->withAttempt($now, error: $error));
+    // либо, при повторяемой ошибке:
+    //   $storage->save($delivery->withAttempt($now, error: $error));
+    //   $storage->releaseClaim($delivery);
+}
+```
+
+`leaseSeconds` обязан переживать самую медленную попытку доставки: lease,
+истёкший, пока worker ещё доставляет, позволит второму worker-у захватить ту же
+доставку. Каждую захваченную доставку нужно пометить или отпустить — иначе она
+ждёт истечения всего lease.
+
+`WebhookDelivery` несёт id события, его тип и адрес назначения — но не payload и
+не способ добраться до секрета endpoint-а. Разделение осознанное: payload'ы
+большие, а секретам незачем лежать рядом с таблицей, которую опрашивают ради
+статуса доставки. Следствие: worker, переживший рестарт, обязан сделать два
+собственных запроса, и оба — на пачку, а не на каждую доставку:
+
+- **payload'ы** — из собственного хранилища событий, по списку `getEventId()`;
+- **endpoint'ы** — оттуда, где хранятся регистрации, по `getEndpointUrl()`;
+  именно там лежат секрет и дополнительные заголовки.
+
+`examples/delivery_tracking.php` ретраит объекты, ещё живые в памяти, — на это
+настоящий worker полагаться не может; форму пачки показывает
+`examples/claiming_worker.php`.
+
 ## API-справочник
 
 ### WebhookEvent
@@ -191,10 +253,25 @@ if ($policy->isReadyForRetry($delivery, $clock->now())) {
 
 | Метод | Описание |
 |---|---|
-| `__construct(url, secret, headers?)` | URL обязан использовать http/https; secret — непустой |
+| `__construct(url, secret, headers?, allowPrivateNetwork?)` | Схема http/https, непустой host, без credentials в URL, непустой secret |
 | `getUrl()` | URL эндпоинта |
 | `getSecret()` | Shared secret (не сохраняется в delivery) |
 | `getHeaders()` | Дополнительные заголовки запроса |
+| `allowsPrivateNetwork()` | Разрешено ли этому эндпоинту смотреть внутрь периметра |
+
+URL, host которого — loopback, приватный, link-local или иной зарезервированный
+IP-литерал (`127.0.0.1`, `10.0.0.5`, `169.254.169.254`, `[::1]`, `localhost`),
+отклоняется — см. [Безопасность](#безопасность). Для эндпоинтов внутри периметра
+передайте `allowPrivateNetwork: true`. Credentials в URL
+(`https://user:pass@host/`) отклоняются: это секрет, а запись о доставке хранит
+URL дословно. Для аутентификации используйте `headers`.
+
+Host сравнивается так, как его видит резолвер: одна завершающая точка — это
+корневая метка DNS, поэтому `localhost.` и `127.0.0.1.` отклоняются ровно так же,
+как `localhost` и `127.0.0.1`, а `https://./hook` отклоняется как URL без host-а.
+Публичные host-ы с корневой меткой (`https://partner.example.com./hook`)
+принимаются, а `getUrl()` возвращает ровно то, что передали: нормализация нужна
+только проверкам и никогда не трогает сохранённый URL.
 
 ### WebhookSignature
 
@@ -217,8 +294,25 @@ if ($policy->isReadyForRetry($delivery, $clock->now())) {
 
 ### HmacSha256Signer
 
-Подписывает `"{eventId}.{timestamp}.{payload}"` секретом через HMAC-SHA256.
-`payload` — это исходная строка HTTP-тела, а не пересериализованное JSON-значение.
+Подписывает `"{len(eventId)}.{eventId}.{timestamp}.{len(payload)}.{payload}"`
+секретом через HMAC-SHA256. `payload` — это исходная строка HTTP-тела, а не
+пересериализованное JSON-значение.
+
+Длина-префиксы и делают сообщение каноническим: `.` допустима внутри eventId,
+поэтому без них одна подписанная строка разбирается на несколько разных троек
+(eventId, timestamp, payload), и перехваченную доставку можно пересобрать под
+той же подписью.
+
+> **Апгрейд с 1.x: байты подписи изменились.** 1.x подписывала
+> `"{eventId}.{timestamp}.{payload}"`. Получатель на 1.x отвергнет подпись 2.0,
+> получатель на 2.0 отвергнет подпись 1.x — поэтому никакой порядок выкатки не
+> убирает разрыв: получателю нужно окно, в котором он принимает оба формата.
+> В [UPGRADE.md](UPGRADE.md) — legacy-`WebhookSigner` на пять строк и порядок из
+> трёх шагов (получатели принимают оба → отправитель переходит на 2.0 →
+> получатели убирают legacy-ветку). С получателями, которыми вы не управляете,
+> нужен не порядок выкатки, а согласование. И учтите:
+> `roave/backward-compatibility-check` считает релиз чистым — он сравнивает
+> PHP-API, а слом здесь на проводе.
 
 | Метод | Описание |
 |---|---|
@@ -241,6 +335,7 @@ if ($policy->isReadyForRetry($delivery, $clock->now())) {
 | `nextDelaySeconds(attempts)` | Задержка перед следующей попыткой; `attempts` = текущее количество попыток |
 | `shouldRetry(delivery)` | Возвращает `true`, если статус `Pending` и `attempts < maxAttempts` |
 | `isReadyForRetry(delivery, now)` | Возвращает `true`, когда задержка истекла |
+| `readyThresholds(now)` | То же правило в виде данных для запроса backend-а: количество попыток => последний `lastAttemptAt`, который уже готов |
 
 ### WebhookDelivery
 
@@ -266,11 +361,37 @@ if ($policy->isReadyForRetry($delivery, $clock->now())) {
 
 | Метод | Описание |
 |---|---|
-| `save(delivery)` | Сохраняет запись о попытке доставки |
-| `findPending(limit)` | Возвращает доставки в статусе `Pending` |
-| `markDelivered(delivery)` | Помечает доставку как `Delivered` |
-| `markFailed(delivery)` | Помечает доставку как `Failed` |
+| `save(delivery)` | Сохраняет новую доставку либо обновляет состояние попыток уже сохранённой — но не её статус |
+| `findPending(limit)` | Возвращает доставки в статусе `Pending` — готовые или нет, захваченные или нет |
+| `markDelivered(delivery)` | Помечает доставку как `Delivered`, если она ещё `Pending` |
+| `markFailed(delivery)` | Помечает доставку как `Failed`, если она ещё `Pending` |
 | `getById(id)` | Загружает доставку по ID |
+
+Статус уже существующей доставки `save()` намеренно не пишет: иначе worker со
+устаревшей копией вернул бы завершённую доставку в `Pending` — и тот же webhook
+ушёл бы получателю второй раз. Статус пишут только `markDelivered()` и
+`markFailed()` — захват в это число не входит.
+
+### ClaimingDeliveryStorage
+
+Опциональный интерфейс (расширяет `WebhookDeliveryStorage`) для backend-ов,
+умеющих отдать доставку ровно одному worker-у. Реализуется в
+`rasuvaeff/yii3-webhooks-db`, а также в `InMemoryDeliveryStorage`.
+
+| Метод | Описание |
+|---|---|
+| `claimReady(now, readyThresholds, maxAttempts, leaseSeconds?, limit?)` | Захватывает доставки, готовые к следующей попытке, пропуская те, что ещё ждут backoff |
+| `releaseClaim(delivery)` | Досрочно возвращает захват; `true`, если он был снят |
+
+Владение — это lease, а не статус: захваченная доставка остаётся `Pending`, и
+упавший worker её не «подвешивает» — lease просто истекает. Исчерпавшие попытки
+доставки (`attempts >= maxAttempts`) тоже выдаются: пометить их `Failed` может
+только вызывающий.
+
+Если вы реализуете этот интерфейс: `claimReady()` пишет lease и больше ничего.
+Перевод статуса в «claimed»/«in-flight» вывел бы каждую захваченную доставку
+из-под `Pending`, с которым сравнивают `markDelivered()`/`markFailed()`, и их
+compare-and-set молча перестал бы фиксировать исходы.
 
 ### ReplayGuard
 
@@ -326,21 +447,67 @@ Backed string enum с тремя случаями:
 
 | Метод | Описание |
 |---|---|
-| `save(delivery)` | Сохраняет запись о доставке |
+| `save(delivery)` | Сохраняет запись о доставке; статус уже сохранённой не меняет |
 | `findPending(limit)` | Возвращает доставки в статусе `Pending` |
-| `markDelivered(delivery)` | Устанавливает статус `Delivered` |
-| `markFailed(delivery)` | Устанавливает статус `Failed` |
+| `claimReady(now, readyThresholds, maxAttempts, leaseSeconds?, limit?)` | Захватывает готовые доставки — контракт тот же, что у DB-backend-а |
+| `releaseClaim(delivery)` | Досрочно возвращает захват |
+| `markDelivered(delivery)` | Устанавливает статус `Delivered`, если сохранённая доставка ещё `Pending` |
+| `markFailed(delivery)` | Устанавливает статус `Failed`, если сохранённая доставка ещё `Pending` |
 | `getById(id)` | Загружает доставку по ID |
-| `clear()` | Удаляет все записи |
+| `clear()` | Удаляет все записи и захваты |
 
 ## Безопасность
 
 - Сравнение подписей использует `hash_equals()` — защита от timing-атак.
-- `WebhookDelivery` хранит только URL эндпоинта, но не секрет.
+- Каноническое сообщение длина-префиксовано, поэтому разбирается ровно в одну
+  тройку (eventId, timestamp, payload). Собственный `WebhookSigner` обязан
+  сохранять это свойство: конкатенация компонентов переменной длины через
+  разделитель, который может встретиться внутри них, позволяет пересобрать
+  перехваченную доставку под той же подписью — с другим payload-ом и другим
+  nonce для replay guard.
+- `WebhookDelivery` хранит только URL эндпоинта, но не секрет. Именно поэтому
+  credentials в URL отклоняются: URL дословно сохраняется в каждой записи о
+  доставке; для аутентификации есть `headers`.
+- **Сам URL эндпоинта чувствителен — логировать его как есть нельзя.** Query
+  принимается (`https://host/hook?token=…` — то, чем получатель без другого
+  канала себя аутентифицирует) и сохраняется дословно, поэтому запись о доставке
+  может нести credential получателя открытым текстом. Вырезайте query и fragment
+  до того, как URL попадёт в лог, в метку метрики, в отчёт об ошибке или на
+  экран поддержки:
+
+  ```php
+  $parts = parse_url($delivery->getEndpointUrl());
+  $safe = ($parts['scheme'] ?? 'https') . '://' . ($parts['host'] ?? '') . ($parts['path'] ?? '');
+  ```
 - Все параметры-секреты помечены `#[\SensitiveParameter]` — они не появятся в stack trace.
 - Всегда валидируйте timestamp (допуск), чтобы предотвратить replay старых подписей.
 - Используйте `ReplayGuard` с персистентным `NonceStorage` в production; реализации
   хранилища обязаны атомарно отклонять дубликаты.
+
+### SSRF: URL эндпоинта — недоверенный вход
+
+Везде, где пользователи регистрируют свои webhook-эндпоинты, URL назначения
+контролируется атакующим, а worker доставки работает внутри доверенной сети.
+Поэтому `WebhookEndpoint` отклоняет credentials в URL и host-ы, являющиеся
+loopback-, приватными, link-local или иными зарезервированными IP-литералами —
+включая `169.254.169.254`, адрес cloud metadata. `allowPrivateNetwork: true`
+возвращает отдельному эндпоинту это право.
+
+Сама по себе эта проверка не является anti-SSRF политикой, и конструктор
+намеренно не резолвит доменные имена. Остальное — на стороне dispatcher-а:
+
+- **Резолвить и фильтровать в момент доставки.** Имя, резолвящееся в приватный
+  диапазон, — это SSRF-цель, как бы ни выглядел URL, а DNS меняется между
+  регистрацией и доставкой.
+- **Запретить редиректы или перепроверять каждый хоп.** URL, прошедший все
+  проверки, может средиректить во внутреннюю сеть. Guzzle по умолчанию идёт до
+  5 редиректов: `new Client(['allow_redirects' => false])`.
+- **Ставить таймауты.** У Guzzle `timeout` по умолчанию `0` — получатель,
+  принявший соединение и не отвечающий, вешает worker навсегда.
+- **Не отдавать тела ответов регистранту.** `lastError` возвращается API
+  статуса доставки; внутренний ответ, попавший туда, — и есть добыча атакующего.
+
+Дефолты клиента — в [examples/dispatcher.php](examples/dispatcher.php).
 
 ## Примеры
 

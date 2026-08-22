@@ -13,12 +13,15 @@ Public API:
 - `WebhookEndpoint` — target URL + secret + optional headers
 - `WebhookSignature` — HMAC signature (timestamp + value) with header serialization
 - `WebhookSigner` — signing interface
-- `HmacSha256Signer` — HMAC-SHA256 implementation; signs `"{t}.{payload}"` with secret
+- `HmacSha256Signer` — HMAC-SHA256 implementation; signs the length-prefixed
+  canonical message (see Invariants)
 - `WebhookVerifier` — inbound verification: timestamp tolerance + HMAC comparison
-- `WebhookDelivery` — delivery attempt record (no secret stored — safe to log)
+- `WebhookDelivery` — delivery attempt record (no secret stored; the endpoint
+  URL it does store is still sensitive — see Invariants)
 - `WebhookDeliveryStatus` — enum: `Pending`, `Delivered`, `Failed`
 - `WebhookDeliveryStorage` — storage interface
-- `InMemoryDeliveryStorage` — test implementation
+- `ClaimingDeliveryStorage` — optional storage interface: lease-based claiming
+- `InMemoryDeliveryStorage` — test implementation (implements both)
 - `WebhookRetryPolicy` — retry logic (maxAttempts, delaySeconds)
 - `WebhookDispatcher` — dispatcher interface
 - `NonceStorage` — nonce storage interface
@@ -78,9 +81,44 @@ make release-check
   `yii3-webhooks-db`. Nothing derives meaning from the id's shape (the storage
   uses it only as an equality condition), so `create(id: ...)` is pure
   convenience, but the ceiling is real.
-- Canonical message for signing: `"{eventId}.{timestamp}.{payload}"` where
-  `eventId` is sent as `X-Webhook-Id` header, and `payload` is the exact raw
-  body string. Do not re-encode JSON before verification.
+- Canonical message for signing:
+  `"{strlen(eventId)}.{eventId}.{timestamp}.{strlen(payload)}.{payload}"`, where
+  `eventId` is sent as the `X-Webhook-Id` header and `payload` is the exact raw
+  body string. Do not re-encode JSON before verification. **The length prefixes
+  are load-bearing**: `.` is legal inside an event id, so without them one signed
+  string parses into several (eventId, timestamp, payload) triples and an
+  intercepted delivery can be re-framed around the same signature with a payload
+  of the attacker's choosing (and a different replay-guard nonce). Any change to
+  the canonical message breaks every deployed receiver — treat it as such.
+- **Storage contract.** `save()` must never write the status of a delivery that
+  already exists (a stale copy would resurrect a finished delivery);
+  `markDelivered()`/`markFailed()` are the only writers of a status. A claim is
+  not one of them: `claimReady()` writes a lease while the delivery stays
+  `Pending`, and a backend that flipped the status while claiming would put
+  every claimed delivery outside the `Pending` the two terminal methods compare
+  against. With more than one worker the storage must implement
+  `ClaimingDeliveryStorage` — `findPending()` is not a fallback for one that
+  does not, because every worker gets the same batch; that case means one
+  worker. `claimReady()` must also hand out deliveries with
+  `attempts >= maxAttempts` — nothing else can terminate them.
+  `markDelivered()`/`markFailed()` are a compare-and-set on `Pending`: the loser
+  of a race must not overwrite the winner's outcome. `InMemoryDeliveryStorage`
+  obeys the same rule, so a consumer debugged against it behaves the same in
+  production.
+- **`WebhookEndpoint` treats the URL as attacker-controlled**: http/https only,
+  a host that is a host name or IP literal, no credentials, and no loopback /
+  private / link-local / reserved IP literal unless `allowPrivateNetwork: true`.
+  A single trailing dot is the DNS root label and is stripped before every host
+  check — `localhost.` and `127.0.0.1.` are the same names as `localhost` and
+  `127.0.0.1` to a resolver, and used to walk straight past the loopback check;
+  the normalisation touches the comparison only, never the stored URL. It
+  deliberately does not resolve host names — resolving guards, redirect policy
+  and timeouts belong to the dispatcher (README Security section).
+- **The endpoint URL is sensitive, and a `WebhookDelivery` is not safe to log
+  as-is.** Credentials are rejected but a query string is accepted and stored
+  verbatim, so `https://host/hook?token=…` is a receiver credential sitting in
+  the delivery row. Anything logging a delivery must redact query and fragment;
+  never re-add the "safe to log" phrasing that used to be here.
 - Signature header format: `t={timestamp},v1={hmac_hex}`.
 - Signature comparison MUST use `hash_equals()` — never `===`.
 - `WebhookVerifier` returns `bool` — it does NOT throw on invalid signatures.
