@@ -145,7 +145,7 @@ use Rasuvaeff\Yii3Webhooks\ClaimingDeliveryStorage;
 // and rasuvaeff/yii3-webhooks-db implement it. There is no fallback to
 // findPending() in a multi-worker loop: it hands the same batch to every worker.
 if (!$storage instanceof ClaimingDeliveryStorage) {
-    throw new RuntimeException($storage::class . ' cannot claim; run a single worker instead');
+    throw new \RuntimeException($storage::class . ' cannot claim; run a single worker instead');
 }
 
 $batch = $storage->claimReady(

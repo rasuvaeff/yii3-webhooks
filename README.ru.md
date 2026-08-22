@@ -194,7 +194,7 @@ if (!$storage instanceof ClaimingDeliveryStorage) {
     // захвата — это ошибка конфигурации для такого worker-а, а не деградация.
     // Либо один worker (см. «Отслеживание доставок» выше), либо storage,
     // умеющий захватывать.
-    throw new RuntimeException(sprintf(
+    throw new \RuntimeException(sprintf(
         '%s cannot claim deliveries; running more than one worker on it delivers every webhook twice',
         $storage::class,
     ));

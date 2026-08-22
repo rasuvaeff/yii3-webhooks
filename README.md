@@ -189,7 +189,7 @@ if (!$storage instanceof ClaimingDeliveryStorage) {
     // storage that cannot claim is a configuration error for this worker, not
     // a degraded mode. Run one worker (see "Tracking deliveries" above) or
     // switch to a storage that claims.
-    throw new RuntimeException(sprintf(
+    throw new \RuntimeException(sprintf(
         '%s cannot claim deliveries; running more than one worker on it delivers every webhook twice',
         $storage::class,
     ));

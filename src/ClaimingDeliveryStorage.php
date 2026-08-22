@@ -20,7 +20,7 @@ use DateTimeImmutable;
  *
  * ```php
  * if (!$storage instanceof ClaimingDeliveryStorage) {
- *     throw new RuntimeException($storage::class . ' cannot claim; run a single worker instead');
+ *     throw new \RuntimeException($storage::class . ' cannot claim; run a single worker instead');
  * }
  *
  * $batch = $storage->claimReady($now, $policy->readyThresholds($now), $policy->getMaxAttempts());
