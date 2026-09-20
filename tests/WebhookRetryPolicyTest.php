@@ -9,6 +9,7 @@ use InvalidArgumentException;
 use Rasuvaeff\PropertyTesting\ArbitraryInterface;
 use Rasuvaeff\PropertyTesting\Gen;
 use Rasuvaeff\PropertyTesting\Property;
+use Rasuvaeff\PropertyTesting\Target;
 use Rasuvaeff\Yii3Webhooks\WebhookDelivery;
 use Rasuvaeff\Yii3Webhooks\WebhookDeliveryStatus;
 use Rasuvaeff\Yii3Webhooks\WebhookEndpoint;
@@ -340,6 +341,31 @@ final class WebhookRetryPolicyTest
         yield 'exponential overflows PHP_INT_MAX before the cap applies' => [100, 3_600, 0, 2.0, 80];
     }
 
+    /**
+     * Same envelope as {@see nextDelayStaysWithinZeroAndCap}, but the search
+     * phase steers the random inputs toward the largest delay it can find
+     * instead of relying on uniform sampling to stumble across the boundary.
+     * Reuses the same generators — the assertion is unchanged, only how hard
+     * the property looks for a violation.
+     */
+    #[Property(runs: 200, searchRuns: 200, generators: 'nextDelayStaysWithinZeroAndCapGenerators')]
+    public function nextDelaySearchClimbsTowardTheCapWithoutExceedingIt(int $maxAttempts, int $baseSeconds, int $capExtra, float $multiplier, int $attempts): void
+    {
+        $cap = $baseSeconds + $capExtra;
+        $policy = WebhookRetryPolicy::exponential(
+            maxAttempts: $maxAttempts,
+            baseSeconds: $baseSeconds,
+            cap: $cap,
+            multiplier: $multiplier,
+        );
+        $delay = $policy->nextDelaySeconds($attempts);
+
+        Target::maximize('delay', $delay);
+
+        Assert::true($delay >= 0);
+        Assert::true($delay <= $cap);
+    }
+
     // ── overflow ─────────────────────────────────────────────────────────────
 
     public function nextDelayIsCappedWhenTheExponentialOverflows(): void
@@ -502,5 +528,33 @@ final class WebhookRetryPolicyTest
         yield 'fresh delivery (attempts=0)' => [0, 1];
         yield 'one below max' => [7, 1];
         yield 'minimum slack' => [4, 1];
+    }
+
+    /**
+     * `shouldRetry()` reduces to "still Pending and under the attempt cap"
+     * for every status and every small attempts/maxAttempts pair — walked
+     * exhaustively (3 statuses × 6 attempt counts × 5 caps = 90 combinations)
+     * instead of sampled, since the whole domain is small enough to fit.
+     */
+    #[Property(exhaustive: true)]
+    public function shouldRetryReducesToPendingAndUnderMaxAttemptsExhaustively(WebhookDeliveryStatus $status, int $attempts, int $maxAttempts): void
+    {
+        $policy = WebhookRetryPolicy::fixed(maxAttempts: $maxAttempts);
+        $delivery = $this->delivery(attempts: $attempts)->withStatus($status);
+
+        Assert::same(
+            $policy->shouldRetry($delivery),
+            $status === WebhookDeliveryStatus::Pending && $attempts < $maxAttempts,
+        );
+    }
+
+    /** @return array<string, ArbitraryInterface> */
+    public static function shouldRetryReducesToPendingAndUnderMaxAttemptsExhaustivelyGenerators(): array
+    {
+        return [
+            'status' => Gen::enum(WebhookDeliveryStatus::class),
+            'attempts' => Gen::intBetween(0, 5),
+            'maxAttempts' => Gen::intBetween(1, 5),
+        ];
     }
 }
