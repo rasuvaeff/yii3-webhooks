@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.0.1 — 2026-10-23
 
 - Docs and example only, no change to `src/`: the SSRF section of the README
   (and `README.ru.md`, `llms.txt`, the skill) now points to
