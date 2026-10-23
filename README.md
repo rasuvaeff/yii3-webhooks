@@ -443,16 +443,42 @@ does not resolve host names. The dispatcher owns the rest:
 - **Resolve and filter at delivery time.** A name that resolves into a private
   range is an SSRF target whatever the URL looks like, and DNS can change
   between registration and delivery.
+- **Pin the connection to what you checked.** Resolving, checking and then
+  letting the HTTP client resolve again is the DNS-rebinding window: the second
+  answer can be an internal address.
 - **Refuse redirects, or re-check every hop.** A URL that passed every check can
   redirect into the internal network. Guzzle follows up to 5 redirects by
-  default: `new Client(['allow_redirects' => false])`.
+  default.
 - **Set timeouts.** Guzzle's default `timeout` is `0` — a receiver that accepts
   the connection and never answers parks the worker forever.
 - **Do not hand response bodies back to the registrant.** `lastError` is returned
   by delivery-status APIs; an internal response echoed there is the payoff of
   the attack.
 
-See [examples/dispatcher.php](examples/dispatcher.php) for the client defaults.
+[`rasuvaeff/pinned-http-client`](https://github.com/rasuvaeff/pinned-http-client)
+is a PSR-18 client that does the first three: it resolves the host at delivery
+time, checks **every** address (private, loopback, link-local including the
+metadata address, CGNAT, reserved, multicast; an IPv4-in-IPv6 address is judged
+as the embedded IPv4), pins the connection to the checked addresses and never
+follows redirects. A refusal is a `PinningFailed` (a PSR-18
+`NetworkExceptionInterface`), which a dispatcher records as a failed attempt:
+
+```php
+use Rasuvaeff\PinnedHttpClient\PinnedClient;
+
+$dispatcher = new HttpWebhookDispatcher(
+    httpClient: new PinnedClient(timeoutSeconds: 5.0, connectTimeoutSeconds: 3.0),
+    // request/stream factories, signer, clock
+);
+```
+
+The timeouts above are the last bullet's answer. The recording is the
+dispatcher's part: the example [`HttpWebhookDispatcher`](examples/HttpWebhookDispatcher.php)
+writes only fixed text to `lastError` (the status code, or "request not sent"),
+never the response body, the exception message or the resolved address. See
+[examples/dispatcher.php](examples/dispatcher.php) for the wiring; it runs
+without network and shows a delivery to a private host refused as a failed
+attempt.
 
 ## Examples
 

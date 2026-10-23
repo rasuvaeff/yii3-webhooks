@@ -3,105 +3,45 @@
 declare(strict_types=1);
 
 /**
- * Example: implementing WebhookDispatcher with Guzzle (PSR-18).
+ * Example: a WebhookDispatcher that is safe against SSRF (PSR-18).
  *
- * This library ships WebhookDispatcher as an interface only.
- * Wire in any PSR-18-compatible HTTP client — this example uses Guzzle.
+ * This library ships WebhookDispatcher as an interface only. The dispatcher in `HttpWebhookDispatcher.php` takes any
+ * PSR-18 client; the client decides what the destination may be. `rasuvaeff/pinned-http-client` resolves the host name
+ * at delivery time, checks every address it got, pins the connection to the checked addresses (no DNS rebinding between
+ * the check and the connect) and never follows redirects. A refusal is a failed attempt, not an exception.
  *
- * composer require guzzlehttp/guzzle guzzlehttp/psr7
+ * composer require rasuvaeff/pinned-http-client
  */
 
 require __DIR__ . '/../vendor/autoload.php';
 
-if (!class_exists('GuzzleHttp\Client')) {
-    echo "This example requires Guzzle. Run:\n  composer require guzzlehttp/guzzle guzzlehttp/psr7\n";
+if (!class_exists('Rasuvaeff\PinnedHttpClient\PinnedClient') || !class_exists('GuzzleHttp\Psr7\HttpFactory')) {
+    echo "This example requires the pinned client. Run:\n  composer require rasuvaeff/pinned-http-client\n";
     exit(0);
 }
 
-use GuzzleHttp\Client;
 use GuzzleHttp\Psr7\HttpFactory;
 use Psr\Clock\ClockInterface;
-use Psr\Http\Client\ClientExceptionInterface;
-use Psr\Http\Client\ClientInterface;
-use Psr\Http\Message\RequestFactoryInterface;
-use Psr\Http\Message\StreamFactoryInterface;
+use Rasuvaeff\PinnedHttpClient\PinnedClient;
+use Rasuvaeff\Yii3Webhooks\Examples\HttpWebhookDispatcher;
 use Rasuvaeff\Yii3Webhooks\HmacSha256Signer;
-use Rasuvaeff\Yii3Webhooks\WebhookDelivery;
-use Rasuvaeff\Yii3Webhooks\WebhookDeliveryStatus;
-use Rasuvaeff\Yii3Webhooks\WebhookDispatcher;
 use Rasuvaeff\Yii3Webhooks\WebhookEndpoint;
 use Rasuvaeff\Yii3Webhooks\WebhookEvent;
-use Rasuvaeff\Yii3Webhooks\WebhookSigner;
 
-final readonly class GuzzleWebhookDispatcher implements WebhookDispatcher
-{
-    public function __construct(
-        private ClientInterface $httpClient,
-        private RequestFactoryInterface $requestFactory,
-        private StreamFactoryInterface $streamFactory,
-        private WebhookSigner $signer,
-        private ClockInterface $clock,
-    ) {}
-
-    public function dispatch(WebhookEvent $event, WebhookEndpoint $endpoint): WebhookDelivery
-    {
-        $now = $this->clock->now();
-        $delivery = WebhookDelivery::create(event: $event, endpoint: $endpoint, createdAt: $now);
-        $signature = $this->signer->sign(
-            payload: $event->getPayload(),
-            secret: $endpoint->getSecret(),
-            timestamp: $now->getTimestamp(),
-            eventId: $event->getId(),
-        );
-
-        $request = $this->requestFactory
-            ->createRequest('POST', $endpoint->getUrl())
-            ->withHeader('Content-Type', 'application/json')
-            ->withHeader('X-Webhook-Signature', $signature->toHeaderValue())
-            ->withHeader('X-Webhook-Event', $event->getType())
-            ->withHeader('X-Webhook-Id', $event->getId())
-            ->withBody($this->streamFactory->createStream($event->getPayload()));
-
-        foreach ($endpoint->getHeaders() as $name => $value) {
-            $request = $request->withHeader($name, $value);
-        }
-
-        try {
-            $response = $this->httpClient->sendRequest($request);
-            $statusCode = $response->getStatusCode();
-
-            if ($statusCode >= 200 && $statusCode < 300) {
-                return $delivery
-                    ->withAttempt(at: $now)
-                    ->withStatus(status: WebhookDeliveryStatus::Delivered);
-            }
-
-            return $delivery->withAttempt(at: $now, error: 'HTTP ' . $statusCode);
-        } catch (ClientExceptionInterface $e) {
-            return $delivery->withAttempt(at: $now, error: $e->getMessage());
-        }
-    }
-}
-
-// Usage:
 $factory = new HttpFactory();
 $clock = new class implements ClockInterface {
     public function now(): \DateTimeImmutable { return new \DateTimeImmutable(); }
 };
 
-$dispatcher = new GuzzleWebhookDispatcher(
-    // Guzzle's defaults are wrong for webhook delivery in two ways, and both
-    // are security-relevant:
-    //   allow_redirects — on by default, up to 5 hops. A URL that passed every
-    //     check you made can redirect into your internal network, so either
-    //     refuse redirects (below) or re-run the anti-SSRF check on each hop.
-    //   timeout — 0 by default, i.e. no limit: one receiver that accepts the
-    //     connection and never answers parks this worker forever.
-    httpClient: new Client([
-        'allow_redirects' => false,
-        'connect_timeout' => 3,
-        'timeout' => 5,
-    ]),
+// The resolver is injected only so that this example needs no network: here every name resolves to a private address,
+// as it would for a registrant who points a host name at your internal network. In production leave it out and the
+// client resolves through DNS (`gethostbynamel`).
+$dispatcher = new HttpWebhookDispatcher(
+    httpClient: new PinnedClient(
+        timeoutSeconds: 5.0,
+        connectTimeoutSeconds: 3.0,
+        resolver: static fn (string $host): array => ['10.0.0.5'],
+    ),
     requestFactory: $factory,
     streamFactory: $factory,
     signer: new HmacSha256Signer(),
@@ -113,3 +53,4 @@ $endpoint = new WebhookEndpoint(url: 'https://partner.example.com/webhook', secr
 
 $delivery = $dispatcher->dispatch($event, $endpoint);
 echo "Status: {$delivery->getStatus()->value}, Attempts: {$delivery->getAttempts()}\n";
+echo 'Last error: ' . ($delivery->getLastError() ?? 'none') . "\n";
