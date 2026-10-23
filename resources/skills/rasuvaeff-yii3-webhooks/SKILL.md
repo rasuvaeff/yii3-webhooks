@@ -66,8 +66,10 @@ retry policy for webhooks. No HTTP client dependency — you implement
    loopback/private/link-local/reserved IP literals — including the root-label
    spellings `localhost.` and `127.0.0.1.`, which resolvers treat as the same
    names (`allowPrivateNetwork: true` opts back in) — but does not resolve host
-   names: your dispatcher must resolve-and-filter, refuse redirects (or re-check
-   every hop) and set timeouts. Guzzle's defaults do neither.
+   names: your dispatcher must resolve-and-filter, pin the connection to the checked
+   addresses, refuse redirects (or re-check every hop) and set timeouts. Guzzle's
+   defaults do none of it: use `rasuvaeff/pinned-http-client` as the PSR-18 client
+   (`examples/dispatcher.php`) and write only fixed text to `lastError`.
 
 5. **More than one delivery worker => claim, do not poll.** `findPending()`
    hands the same deliveries to every worker and ignores backoff, so it is not a

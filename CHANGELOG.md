@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.0.1 — 2026-10-23
+
+- Docs and example only, no change to `src/`: the SSRF section of the README
+  (and `README.ru.md`, `llms.txt`, the skill) now points to
+  `rasuvaeff/pinned-http-client` as the PSR-18 client that resolves and filters
+  at delivery time, pins the connection and refuses redirects, with a snippet.
+  `examples/dispatcher.php` wires it (no network needed: it shows a delivery to
+  a private host refused as a failed attempt); the example dispatcher moved to
+  `examples/HttpWebhookDispatcher.php` and records only fixed text in
+  `lastError`. `composer.json`: `suggest` and `require-dev` for
+  `rasuvaeff/pinned-http-client`.
+
 ## 2.0.0 — 2026-08-22
 
 A major for three breaking changes, none of which

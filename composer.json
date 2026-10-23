@@ -31,6 +31,7 @@
         "friendsofphp/php-cs-fixer": "^3.95",
         "infection/infection": "^0.35",
         "maglnet/composer-require-checker": "^4.17",
+        "rasuvaeff/pinned-http-client": "^0.1",
         "rasuvaeff/property-testing-testo": "^1.0",
         "rasuvaeff/rector-named-literals": "^1.0",
         "rector/rector": "^2.4",
@@ -40,6 +41,9 @@
         "vimeo/psalm": "^6.16",
         "yiisoft/test-support": "^3.2"
     },
+    "suggest": {
+        "rasuvaeff/pinned-http-client": "PSR-18 client that resolves the host at delivery time, checks every address, pins the connection to them and never follows redirects: the SSRF-safe client for a WebhookDispatcher (see examples/dispatcher.php)"
+    },
     "autoload": {
         "psr-4": {
             "Rasuvaeff\\Yii3Webhooks\\": "src/"
@@ -48,6 +52,7 @@
     "autoload-dev": {
         "psr-4": {
             "Rasuvaeff\\Yii3Webhooks\\Benchmarks\\": "benchmarks/",
+            "Rasuvaeff\\Yii3Webhooks\\Examples\\": "examples/",
             "Rasuvaeff\\Yii3Webhooks\\Tests\\": "tests/"
         }
     },

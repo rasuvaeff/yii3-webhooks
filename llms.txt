@@ -38,8 +38,11 @@ composer require rasuvaeff/yii3-webhooks
   trailing dot is the DNS root label and is stripped before the checks, so
   `localhost.`/`127.0.0.1.` are rejected too and `https://./hook` is a URL with no
   host; `getUrl()` still returns the URL verbatim. It does not resolve host names
-  — the dispatcher must resolve-and-filter, refuse redirects (or re-check each
-  hop) and set timeouts.
+  — the dispatcher must resolve-and-filter, pin the connection to the checked
+  addresses, refuse redirects (or re-check each hop) and set timeouts —
+  `rasuvaeff/pinned-http-client` (PSR-18) does the first three
+  (`examples/dispatcher.php`). Write only fixed text to `lastError`: never the
+  response body, the exception message or the resolved address.
 - `save()` never writes the status of a delivery that already exists — only
   `markDelivered()`/`markFailed()` ever write one. A claim writes a lease, not a
   status: the claimed delivery stays `Pending`. Otherwise a stale copy resurrects
