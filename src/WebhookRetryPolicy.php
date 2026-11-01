@@ -35,8 +35,10 @@ final readonly class WebhookRetryPolicy
         }
     }
 
-    public static function fixed(int $maxAttempts = 3, int $delaySeconds = 60): self
-    {
+    public static function fixed(
+        int $maxAttempts = 3,
+        int $delaySeconds = 60,
+    ): self {
         return new self(
             maxAttempts: $maxAttempts,
             baseDelaySeconds: $delaySeconds,

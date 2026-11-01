@@ -360,6 +360,21 @@ final class InMemoryDeliveryStorageTest
         Assert::same($this->ids($this->claim()), []);
     }
 
+    public function claimReadyReturnsADeliveryWithAttemptsButNoRecordedAttemptTime(): void
+    {
+        $this->fixture->save(new WebhookDelivery(
+            id: 'del-1',
+            eventId: 'evt-1',
+            eventType: 'test',
+            endpointUrl: 'https://example.com',
+            status: WebhookDeliveryStatus::Pending,
+            createdAt: new DateTimeImmutable('2026-08-22 10:00:00'),
+            attempts: 1,
+        ));
+
+        Assert::same($this->ids($this->claim()), ['del-1']);
+    }
+
     public function claimReadyReturnsDeliveryWhoseBackoffElapsed(): void
     {
         $this->fixture->save(
