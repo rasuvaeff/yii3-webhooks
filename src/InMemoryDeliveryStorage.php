@@ -42,8 +42,9 @@ final class InMemoryDeliveryStorage implements ClaimingDeliveryStorage, Iterator
     }
 
     #[\Override]
-    public function findPending(int $limit = 100): array
-    {
+    public function findPending(
+        int $limit = 100,
+    ): array {
         $pending = array_filter(
             $this->deliveries,
             static fn(WebhookDelivery $d): bool => $d->getStatus() === WebhookDeliveryStatus::Pending,

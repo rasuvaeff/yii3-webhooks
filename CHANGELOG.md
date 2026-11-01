@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Mutation testing now counts uncovered code (`--with-uncovered`, template mutator settings): overall MSI 99% against `minMsi` 98. Added a test for claiming a delivery that has attempts but no recorded attempt time. `InMemoryDeliveryStorage::findPending()` and `WebhookRetryPolicy::fixed()` signatures reformatted to one parameter per line, no behaviour change.
+
 ## 2.0.1 — 2026-10-23
 
 - Docs and example only, no change to `src/`: the SSRF section of the README
