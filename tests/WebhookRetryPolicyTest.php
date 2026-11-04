@@ -348,7 +348,7 @@ final class WebhookRetryPolicyTest
      * Reuses the same generators — the assertion is unchanged, only how hard
      * the property looks for a violation.
      */
-    #[Property(runs: 200, searchRuns: 200, generators: 'nextDelayStaysWithinZeroAndCapGenerators')]
+    #[Property(runs: 200, generators: 'nextDelayStaysWithinZeroAndCapGenerators', searchRuns: 200)]
     public function nextDelaySearchClimbsTowardTheCapWithoutExceedingIt(int $maxAttempts, int $baseSeconds, int $capExtra, float $multiplier, int $attempts): void
     {
         $cap = $baseSeconds + $capExtra;
