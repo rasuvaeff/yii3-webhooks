@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.0.2 — 2026-11-22
 
 - Mutation testing now counts uncovered code (`--with-uncovered`, template mutator settings): overall MSI 99% against `minMsi` 98. Added a test for claiming a delivery that has attempts but no recorded attempt time. `InMemoryDeliveryStorage::findPending()` and `WebhookRetryPolicy::fixed()` signatures reformatted to one parameter per line, no behaviour change.
 - **Changed:** PHP 8.6 is supported: the `php` constraint is widened to
