@@ -11,7 +11,8 @@ use Psr\Http\Client\ClientInterface;
 use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
 use Rasuvaeff\PinnedHttpClient\PinnedClient;
-use Rasuvaeff\PinnedHttpClient\PinningFailed;
+use Rasuvaeff\PinnedHttpClient\Resolver;
+use Rasuvaeff\PinnedHttpClient\TransferFailed;
 use Rasuvaeff\Yii3Webhooks\Examples\HttpWebhookDispatcher;
 use Rasuvaeff\Yii3Webhooks\HmacSha256Signer;
 use Rasuvaeff\Yii3Webhooks\WebhookDeliveryStatus;
@@ -60,7 +61,18 @@ final class HttpWebhookDispatcherTest
     #[DataProvider('privateResolutionProvider')]
     public function aHostNameThatResolvesIntoAPrivateNetworkIsAFailedAttemptNotAnException(array $addresses): void
     {
-        $delivery = $this->dispatch(new PinnedClient(resolver: static fn(string $host): array => $addresses));
+        $resolver = new class ($addresses) implements Resolver {
+            /** @param list<string> $addresses */
+            public function __construct(private readonly array $addresses) {}
+
+            #[\Override]
+            public function resolve(string $host): array
+            {
+                return $this->addresses;
+            }
+        };
+
+        $delivery = $this->dispatch(new PinnedClient(resolver: $resolver));
 
         Assert::same($delivery->getAttempts(), 1);
         Assert::same($delivery->getLastError(), HttpWebhookDispatcher::NOT_SENT);
@@ -75,7 +87,7 @@ final class HttpWebhookDispatcherTest
         $client = new class implements ClientInterface {
             public function sendRequest(RequestInterface $request): ResponseInterface
             {
-                throw new PinningFailed($request, 'cURL error 7: Failed to connect to partner.example.com port 443 (resolved 10.1.2.3)');
+                throw new TransferFailed($request, 'cURL error 7: Failed to connect to partner.example.com port 443 (resolved 10.1.2.3)');
             }
         };
 

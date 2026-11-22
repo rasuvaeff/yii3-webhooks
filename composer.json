@@ -22,7 +22,7 @@
         "source": "https://github.com/rasuvaeff/yii3-webhooks"
     },
     "require": {
-        "php": "8.3 - 8.5",
+        "php": "8.3 - 8.6",
         "ext-filter": "*",
         "psr/clock": "^1.0"
     },
@@ -31,7 +31,7 @@
         "friendsofphp/php-cs-fixer": "^3.95",
         "infection/infection": "^0.35",
         "maglnet/composer-require-checker": "^4.17",
-        "rasuvaeff/pinned-http-client": "^0.1",
+        "rasuvaeff/pinned-http-client": "^1.1",
         "rasuvaeff/property-testing-testo": "^1.0",
         "rasuvaeff/rector-named-literals": "^1.0",
         "rector/rector": "^2.4",

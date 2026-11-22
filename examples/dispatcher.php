@@ -23,6 +23,7 @@ if (!class_exists('Rasuvaeff\PinnedHttpClient\PinnedClient') || !class_exists('G
 use GuzzleHttp\Psr7\HttpFactory;
 use Psr\Clock\ClockInterface;
 use Rasuvaeff\PinnedHttpClient\PinnedClient;
+use Rasuvaeff\PinnedHttpClient\Resolver;
 use Rasuvaeff\Yii3Webhooks\Examples\HttpWebhookDispatcher;
 use Rasuvaeff\Yii3Webhooks\HmacSha256Signer;
 use Rasuvaeff\Yii3Webhooks\WebhookEndpoint;
@@ -35,12 +36,20 @@ $clock = new class implements ClockInterface {
 
 // The resolver is injected only so that this example needs no network: here every name resolves to a private address,
 // as it would for a registrant who points a host name at your internal network. In production leave it out and the
-// client resolves through DNS (`gethostbynamel`).
+// client resolves through DNS (the default `SystemResolver`).
+$resolver = new class implements Resolver {
+    #[\Override]
+    public function resolve(string $host): array
+    {
+        return ['10.0.0.5'];
+    }
+};
+
 $dispatcher = new HttpWebhookDispatcher(
     httpClient: new PinnedClient(
         timeoutSeconds: 5.0,
         connectTimeoutSeconds: 3.0,
-        resolver: static fn (string $host): array => ['10.0.0.5'],
+        resolver: $resolver,
     ),
     requestFactory: $factory,
     streamFactory: $factory,

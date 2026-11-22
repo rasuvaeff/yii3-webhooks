@@ -19,7 +19,7 @@
 
 ## Требования
 
-- PHP 8.3+
+- PHP 8.3 – 8.6
 - `psr/clock` ^1.0
 
 ## Установка
@@ -515,8 +515,8 @@ loopback-, приватными, link-local или иными зарезерви
 доставки, проверяет **каждый** адрес (приватные, loopback, link-local, включая
 адрес metadata, CGNAT, зарезервированные, multicast; IPv4 внутри IPv6 судится
 как вложенный IPv4), закрепляет соединение за проверенными адресами и никогда
-не идёт по редиректам. Отказ — `PinningFailed` (PSR-18
-`NetworkExceptionInterface`), который dispatcher записывает как неудачную
+не идёт по редиректам. Отказ — `RequestRefused` (PSR-18
+`RequestExceptionInterface`), который dispatcher записывает как неудачную
 попытку:
 
 ```php
