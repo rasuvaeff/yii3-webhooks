@@ -3,6 +3,16 @@
 ## Unreleased
 
 - Mutation testing now counts uncovered code (`--with-uncovered`, template mutator settings): overall MSI 99% against `minMsi` 98. Added a test for claiming a delivery that has attempts but no recorded attempt time. `InMemoryDeliveryStorage::findPending()` and `WebhookRetryPolicy::fixed()` signatures reformatted to one parameter per line, no behaviour change.
+- **Changed:** PHP 8.6 is supported: the `php` constraint is widened to
+  `8.3 - 8.6` (#32). CI runs PHP 8.6 as a regular matrix entry; the
+  backward-compatibility job runs on PHP 8.5.
+- **Changed:** dev dependency `rasuvaeff/pinned-http-client` widened from
+  `^0.1` to `^1.1` (#32): 1.x is the only line whose php range allows 8.6, so
+  the 8.6 CI job cannot resolve `^0.1`. The dispatcher test and the
+  `examples/dispatcher.php` wiring are ported to the 1.x API (`Resolver`
+  interface instead of a closure; `TransferFailed` instead of the removed
+  `PinningFailed`), and the SSRF sections of `README.md`/`README.ru.md` name
+  `RequestRefused` instead of `PinningFailed`.
 
 ## 2.0.1 — 2026-10-23
 

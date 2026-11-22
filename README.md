@@ -19,7 +19,7 @@ own dispatcher.
 
 ## Requirements
 
-- PHP 8.3+
+- PHP 8.3 – 8.6
 - `psr/clock` ^1.0
 
 ## Installation
@@ -460,8 +460,8 @@ is a PSR-18 client that does the first three: it resolves the host at delivery
 time, checks **every** address (private, loopback, link-local including the
 metadata address, CGNAT, reserved, multicast; an IPv4-in-IPv6 address is judged
 as the embedded IPv4), pins the connection to the checked addresses and never
-follows redirects. A refusal is a `PinningFailed` (a PSR-18
-`NetworkExceptionInterface`), which a dispatcher records as a failed attempt:
+follows redirects. A refusal is a `RequestRefused` (a PSR-18
+`RequestExceptionInterface`), which a dispatcher records as a failed attempt:
 
 ```php
 use Rasuvaeff\PinnedHttpClient\PinnedClient;
